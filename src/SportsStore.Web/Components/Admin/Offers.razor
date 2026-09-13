@@ -1,0 +1,8 @@
+@page "/admin/purchases/price"
+@inherits AdminPageBase
+@* Совместимость прежней ссылки на прайс: теперь подбор открывается из списка заказов. *@
+<p>Открываем мои заказы…</p>
+@code {
+    /// <summary>Перенаправляет старую вкладку к началу сборки заказа.</summary>
+    protected override void OnParametersSet() => Navigation.NavigateTo("/admin/purchases", replace: true);
+}

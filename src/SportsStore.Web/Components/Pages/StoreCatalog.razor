@@ -1,0 +1,20 @@
+@page "/catalog"
+@using SportsStore.Application.Storefront
+@inject IStorefront Storefront
+@* Публичная серверная витрина; GET-поиск не требует административной сессии или интерактивного контекста БД. *@
+<PageTitle>Спортивные товары · SportsStoreHMAO</PageTitle><section class="container store-catalog"><p class="eyebrow">ХМАО — Югра / оригинальные бренды</p><h1>Наши товары</h1><form method="get" action="/catalog" class="store-search"><label>Поиск товара<input name="q" value="@Search" maxlength="200" /></label><button class="button" type="submit">Найти</button></form>
+@if (Data is not null) { @if (Data.Total == 0) { <p>Пока нет опубликованных товаров по этому запросу.</p> }<div class="store-grid">@foreach (var p in Data.Items) { <article class="store-card"><a href="@($"/catalog/{p.Id}")">@if (p.Images.Count > 0) { <img src="@p.Images[0]" alt="@p.Name" loading="lazy" /> }<small>@p.Brand · @p.Category</small><h2>@p.Name</h2><strong>от @p.Variants.Min(v => v.Price).ToString("N2") ₽</strong><p>@Availability(p)</p></a></article> }</div><div class="store-pagination">@if (Data.Page > 1) { <a href="@PageUrl(Data.Page - 1)">← Назад</a> }<span>Найдено @Data.Total</span>@if (Data.Page * 24 < Data.Total) { <a href="@PageUrl(Data.Page + 1)">Далее →</a> }</div> }</section>
+@code {
+    /// <summary>Поиск из строки запроса, ограниченный сервисом.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? Search { get; set; }
+    /// <summary>Номер страницы, нормализованный сервером.</summary>
+    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; } = 1;
+    /// <summary>Только опубликованные карточки.</summary>
+    private StorePage? Data;
+    /// <summary>Загружает карточки для текущего GET-запроса.</summary>
+    protected override async Task OnParametersSetAsync() => Data = await Storefront.ListAsync(Search, Page);
+    /// <summary>Сохраняет поисковый запрос в безопасно кодированной ссылке.</summary>
+    private string PageUrl(int page) => $"/catalog?q={Uri.EscapeDataString(Search ?? "")}&page={page}";
+    /// <summary>Доступность считается из фактического остатка и подтверждённых закупок.</summary>
+    private static string Availability(StoreProduct p) => p.Variants.Any(v => v.Available > 0) ? "На складе" : p.Variants.Any(v => v.Incoming > 0) ? "В пути" : "Нет в наличии";
+}

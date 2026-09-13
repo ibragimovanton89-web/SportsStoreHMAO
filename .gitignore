@@ -1,0 +1,22 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+.env
+backups/
+*.dump
+**/TestResults/
+**/appsettings.Local.json
+**/keys/
+# Локальные секреты, сертификаты и результаты работы приложения не публикуются.
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+*.log
+**/secrets.json
+**/appsettings.*.local.json
+artifacts/

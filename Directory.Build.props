@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- Проверяем null при компиляции и используем стандартные пространства имён SDK. -->
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- XML-файлы рядом со сборками дают русские подсказки IDE; отсутствие публичной документации блокирует сборку. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+  </PropertyGroup>
+</Project>

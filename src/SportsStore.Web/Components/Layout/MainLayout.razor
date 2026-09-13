@@ -1,0 +1,8 @@
+@* Общий макет страницы: доступный переход к содержимому, шапка, тело страницы и подвал; уведомление о разрыве Blazor-соединения. *@
+@inherits LayoutComponentBase
+<a class="skip-link" href="#main">Перейти к содержимому</a>
+<Header />
+<main id="main">@Body</main>
+<Footer />
+<div id="blazor-error-ui" role="alert">Соединение прервано. <a href="">Обновить страницу</a></div>
+

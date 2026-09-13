@@ -1,0 +1,121 @@
+@page "/admin/purchases/{Id:guid}"
+@inherits AdminPageBase
+@inject IPurchasing Purchasing
+@* Количества сохраняются каждым нажатием; цены выбранных строк являются снимками закупки. *@
+<PageTitle>Сборка заказа поставщику</PageTitle><div class="page-heading"><h1>Мой заказ</h1><a href="/admin/purchases">Все заказы</a></div>
+<Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Order is not null) {
+<p><strong>@Order.Number</strong> · @Order.Supplier · <span class="badge">@PurchaseLabels.Status(Order.Status)</span></p>
+<section class="admin-panel"><form @onsubmit="Configure" @onsubmit:preventDefault @onchange="() => Dirty = true"><fieldset disabled="@(!Editable || Busy)"><div class="form-grid"><label>Выбранный опт<select @bind="TierId">@foreach (var t in Tiers) { <option value="@t.Id">@t.Name · от @Money(t.Minimum)</option> }</select></label><label>Склад приёмки<select @bind="WarehouseId">@foreach (var w in Warehouses) { <option value="@w.Id">@w.Name</option> }</select></label><label>Примечание<input @bind="Note" maxlength="1000" /></label></div><button>Сохранить условия заказа</button></fieldset></form></section>
+<div class="admin-filters"><label>Код или название<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label><fieldset class="purchase-facet-fields" disabled="@(Busy || Dirty)"><PurchaseFacetPicker Label="Бренд" Items="Facets.Brands" Value="@BrandFilter" ValueChanged="ChangeBrand" /><PurchaseFacetPicker Label="Категория поставщика" Items="Facets.Categories" Value="@CategoryFilter" ValueChanged="ChangeCategory" /></fieldset><label>Показать<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Весь прайс</option><option value="selected">Только выбранное</option></select></label><button class="secondary" disabled="@(Busy || Dirty)" @onclick="Refresh">Обновить сведения</button></div>
+<p class="hint">Бренд и категория определяются по тексту прайса; неоднозначный признак обозначен «Не определён». Фильтры не меняют выбранные количества и общую сумму заказа.</p>
+<p class="hint">Счётчик — количество единиц поставщика. «Упак» остаётся упаковкой; количество в коробке показано для справки. Выбранные позиции сохраняют цены на момент добавления. Остаток показан за вычетом количества в этом заказе. Это расчёт по последнему прайсу, а не резерв у поставщика. При неизвестном остатке выбор разрешён, наличие нужно уточнить.</p>
+@if (Rows is not null) { <div class="table-wrap"><table class="purchase-table"><thead><tr><th>Код и позиция</th><th>Упаковка</th><th>Мелкий опт</th><th>Опт</th><th>Крупный опт</th><th>Остаток поставщика</th><th>Количество</th><th>Сумма</th><th>Приёмка / карточка</th></tr></thead><tbody>@foreach (var r in Rows.Items) {
+<tr @key="r.OfferId"><td><strong>@r.Code</strong><small>@r.Name</small><small>Бренд: @r.Brand</small><small>Категория поставщика: @(r.Category == "Не определён" ? "Не определена" : r.Category)</small></td><td>@r.Unit<small>В коробке: @(r.Box?.ToString("0.####") ?? "—")</small></td><td>@Money(r.Small)</td><td>@Money(r.Wholesale)</td><td>@Money(r.Large)</td><td>@(r.RemainingStock?.ToString("0.####") ?? "Неизвестно")<small>@(r.SupplierStock is null ? "Наличие уточняется" : $"В прайсе: {r.SupplierStock:0.####}")</small>@if (Editable && r.SupplierStock is decimal stock && r.Quantity > stock) { <small role="alert">Уменьшите количество: остаток изменился</small> }</td><td><div class="quantity-control"><button aria-label="@($"Уменьшить {r.Code}")" disabled="@(!Editable || Busy || Dirty || r.Quantity == 0)" @onclick="() => Quantity(r, r.Quantity - 1)">−</button><input aria-label="@($"Количество {r.Code}")" type="number" min="0" max="@(r.SupplierStock is decimal limit ? Math.Min(1000000, Math.Max(r.Quantity, decimal.Floor(limit))) : 1000000)" value="@r.Quantity" disabled="@(!Editable || Busy || Dirty)" @onchange="e => EnterQuantity(r, e)" /><button aria-label="@($"Увеличить {r.Code}")" disabled="@(!Editable || Busy || Dirty || r.Quantity >= 1000000 || r.RemainingStock is < 1)" @onclick="() => Quantity(r, r.Quantity + 1)">+</button></div><small>@r.Unit</small></td><td>@Money(r.Quantity == 0 ? 0 : r.Price * r.Quantity)</td><td>
+@if (r.Quantity > 0) { <small>Принято @r.Received из @r.Quantity</small>
+@if (Receivable && r.Received < r.Quantity) { <AuthorizeView Policy="@AdminPolicies.Administrator"><input aria-label="@($"Принять {r.Code}")" type="number" min="1" max="@(r.Quantity - r.Received)" @bind="ReceiptQuantities[r.OfferId]" /><button disabled="@Busy" @onclick="() => ReceiveOne(r)">Принять строку</button></AuthorizeView> }
+@if (Order.Status is not (PurchaseStatus.Draft or PurchaseStatus.Cancelled)) { @if (r.ProductId is Guid productId) { <a href="@($"/admin/stock/products/{productId}")">Карточка</a> } else { <a href="@($"/admin/purchases/card/{r.OfferId}")">Создать карточку</a> } }
+}</td></tr> }</tbody></table></div><div class="pager"><button disabled="@(Busy || Dirty || Page <= 1)" @onclick="() => GoPage(Page - 1)">Назад</button><span>Позиций @Rows.Total · страница @Page</span><button disabled="@(Busy || Dirty || Page * 25 >= Rows.Total)" @onclick="() => GoPage(Page + 1)">Далее</button></div> }
+<section class="purchase-total admin-panel"><h2>Итоговая сумма: @Money(Order.Total)</h2><p>Выбран @Order.TierName · @Order.Units ед.</p>@if (Order.Remaining is decimal remaining) { <p>@(remaining > 0 ? $"До уровня «{Order.TierName}» осталось ещё {Money(remaining)}" : "Минимальная сумма выбранного опта набрана.")</p> } else { <p>Минимальная сумма не задана. Укажите её в настройках поставщика.</p> }
+@if (Order.MissingPrices > 0) { <p role="alert">У @Order.MissingPrices позиций нет цены выбранного опта. Они не включены в итог; создание заказа заблокировано.</p> }
+<div class="admin-actions">@if (Order.Status == PurchaseStatus.Draft) { <button disabled="@(Busy || Dirty || Order.Units == 0 || Order.MissingPrices > 0)" @onclick="() => Status(PurchaseStatus.Created)">Создать заказ</button> }
+<AuthorizeView Policy="@AdminPolicies.Administrator">
+@if (Order.Status is not (PurchaseStatus.Draft or PurchaseStatus.Cancelled)) { <button type="button" class="secondary" disabled="@(Busy || Dirty)" @onclick="DownloadExcel">Скачать заказ в Excel</button> }
+@if (Order.Status is PurchaseStatus.Draft or PurchaseStatus.Created or PurchaseStatus.Cancelled) { <button disabled="@(Busy || Dirty)" class="danger" @onclick="Delete">Удалить заказ</button> }
+@if (Order.Status == PurchaseStatus.Created) { <button disabled="@(Busy || Dirty)" @onclick="() => Status(PurchaseStatus.Submitted)">Отметить передачу поставщику</button> }
+@if (Order.Status == PurchaseStatus.Submitted) { <button disabled="@Busy" @onclick="() => Status(PurchaseStatus.InTransit)">Товар в пути</button> }
+@if (Order.Status is PurchaseStatus.Submitted or PurchaseStatus.InTransit) { <button disabled="@Busy" class="secondary" @onclick="() => Status(PurchaseStatus.Created)">Вернуть на редактирование</button> }
+@if (Receivable) { <button disabled="@Busy" @onclick="ReceiveAll">Принять весь остаток на склад</button> }
+@if (Order.Status is PurchaseStatus.Draft or PurchaseStatus.Created or PurchaseStatus.Submitted or PurchaseStatus.InTransit) { <button disabled="@Busy" class="danger" @onclick="() => Status(PurchaseStatus.Cancelled)">Отменить заказ</button> }
+</AuthorizeView></div><p class="hint">При отметке передачи поставщику скачивается Excel со всеми выбранными позициями. Прикрепите файл к письму поставщику самостоятельно. Повторное скачивание доступно кнопкой «Скачать заказ в Excel». Приёмка увеличивает только фактически принятое количество.</p></section>
+}
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Подтверждает удаление без приёмок и возвращает сотрудника к списку закупок.</summary>
+    private Task Delete() => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", $"Удалить заказ {Order!.Number} и его состав без возможности восстановления? Карточки, цены и склад сохранятся.")) return; await Purchasing.DeleteAsync(Id, Order.Version, OperationId, Cancellation.Token); Dirty = false; Navigation.NavigateTo("/admin/purchases"); }, true);
+    /// <summary>Бренд предложения поставщика из URL; пустое значение включает все бренды.</summary>
+    [SupplyParameterFromQuery(Name = "brand")] public string? BrandFilter { get; set; }
+    /// <summary>Группа предложения поставщика из URL; не является категорией магазина.</summary>
+    [SupplyParameterFromQuery(Name = "category")] public string? CategoryFilter { get; set; }
+    /// <summary>Доступные значения по всем предложениям поставщика заказа.</summary>
+    private PurchaseFacets Facets = new([], []);
+    /// <summary>Выбирает бренд и сбрасывает страницу, сохраняя остальные ограничения.</summary>
+    private async Task ChangeBrand(string? value) { BrandFilter = value; await SearchWhenReady(); }
+    /// <summary>Выбирает товарную группу и сбрасывает страницу, сохраняя остальные ограничения.</summary>
+    private async Task ChangeCategory(string? value) { CategoryFilter = value; await SearchWhenReady(); }
+    /// <summary>Сохраняет совместный фильтр в URL; количества и сумма заказа не изменяются.</summary>
+    protected override void SearchNow() => Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+    { ["q"] = Search, ["filter"] = Filter, ["sort"] = Sort, ["page"] = 1, ["brand"] = BrandFilter, ["category"] = CategoryFilter }));
+    /// <summary>Закупка из адреса страницы.</summary>
+    [Parameter] public Guid Id { get; set; }
+    /// <summary>Актуальные сумма, статус и версия заказа.</summary>
+    private PurchaseSummary? Order;
+    /// <summary>Страница предложений с количествами.</summary>
+    private AdminPage<PurchasePosition>? Rows;
+    /// <summary>Доступные тарифы поставщика.</summary>
+    private IReadOnlyList<PurchaseTier> Tiers = [];
+    /// <summary>Собственные склады.</summary>
+    private IReadOnlyList<LookupItem> Warehouses = [];
+    /// <summary>Редактируемые ссылки на тариф и склад.</summary>
+    private Guid TierId, WarehouseId;
+    /// <summary>Примечание к закупке.</summary>
+    private string? Note;
+    /// <summary>Явные количества частичной приёмки текущей страницы.</summary>
+    private readonly Dictionary<Guid, int> ReceiptQuantities = [];
+    /// <summary>Подбор допускается до передачи поставщику.</summary>
+    private bool Editable => Order?.Status is PurchaseStatus.Draft or PurchaseStatus.Created;
+    /// <summary>Приёмка возможна для подтверждённой неполностью полученной закупки.</summary>
+    private bool Receivable => Order?.Status is PurchaseStatus.Submitted or PurchaseStatus.InTransit or PurchaseStatus.PartiallyReceived;
+    /// <summary>Обновляет сведения при смене маршрута и поиска.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Перечитывает итог целиком, независимо от страницы таблицы.</summary>
+    private async Task Load() { Order = await Purchasing.OrderAsync(Id, Cancellation.Token); Tiers = await Purchasing.TiersAsync(Order.SupplierId, Cancellation.Token); Warehouses = await Purchasing.WarehousesAsync(Cancellation.Token); TierId = Order.TierId; WarehouseId = Order.WarehouseId; Note = Order.Note; Facets = await Purchasing.FacetsAsync(Id, Cancellation.Token); Rows = await Purchasing.PositionsAsync(Id, Query, Filter == "selected", Cancellation.Token, BrandFilter, CategoryFilter); foreach (var r in Rows.Items) ReceiptQuantities[r.OfferId] = Math.Max(1, r.Quantity - r.Received); }
+    /// <summary>Явно перечитывает актуальные версии после конфликта.</summary>
+    private Task Refresh() => RunAsync(Load);
+    /// <summary>Сохраняет выбор тарифа и пересчитывает строки по их историческим ценам.</summary>
+    private Task Configure() => RunAsync(async () => { await Purchasing.ConfigureAsync(Id, Order!.Version, TierId, WarehouseId, Note, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Сохраняет абсолютный счётчик с защитой от устаревшей версии.</summary>
+    private Task Quantity(PurchasePosition row, int quantity) => RunAsync(async () => { await Purchasing.SetQuantityAsync(Id, Order!.Version, row.OfferId, quantity, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Проверяет ручной ввод целого числа до отправки.</summary>
+    private Task EnterQuantity(PurchasePosition row, ChangeEventArgs e) { if (!int.TryParse(e.Value?.ToString(), out var quantity)) { Error = "Введите целое количество."; return Task.CompletedTask; } return Quantity(row, quantity); }
+    /// <summary>При передаче готовит файл до изменения статуса; версия не позволяет передать другой состав заказа.</summary>
+    /// <param name="status">Подтверждаемый этап закупки.</param>
+    private Task Status(PurchaseStatus status) => RunAsync(async () =>
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", status == PurchaseStatus.Submitted
+            ? "Отметить передачу поставщику и скачать Excel заказа? Файл нужно отправить поставщику самостоятельно."
+            : $"Установить статус «{PurchaseLabels.Status(status)}»?")) return;
+        var version = Order!.Version;
+        var file = status == PurchaseStatus.Submitted ? await Purchasing.ExportExcelAsync(Id, version, Cancellation.Token) : null;
+        await Purchasing.ChangeStatusAsync(Id, version, status, OperationId, Cancellation.Token);
+        // Файл уже соответствует переданной версии. Ошибка скачивания не откатывает сохранённый статус.
+        if (file is not null) await DownloadFile(file);
+        await Load();
+    }, true);
+    /// <summary>Повторно скачивает актуальную сохранённую версию заказа без изменения статуса.</summary>
+    private Task DownloadExcel() => RunAsync(async () => await DownloadFile(await Purchasing.ExportExcelAsync(Id, Order!.Version, Cancellation.Token)));
+    /// <summary>Передаёт Excel браузеру; при сбое предлагает повторное скачивание, не маскируя результат изменения статуса.</summary>
+    /// <param name="file">Готовая книга из проверенного серверного снимка.</param>
+    private async Task DownloadFile(PurchaseExcelFile file)
+    {
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/purchase-download.js");
+            using var stream = new MemoryStream(file.Content, writable: false);
+            using var reference = new DotNetStreamReference(stream);
+            await module.InvokeVoidAsync("downloadPurchase", file.FileName, reference);
+        }
+        catch (Exception error) when (error is JSException or OperationCanceledException)
+        {
+            Error = "Не удалось начать скачивание. Проверьте статус заказа и нажмите «Скачать заказ в Excel» повторно.";
+        }
+    }
+    /// <summary>Принимает только явно введённое количество одной строки.</summary>
+    private Task ReceiveOne(PurchasePosition row) => Receive([new(row.LineId!.Value, ReceiptQuantities[row.OfferId])]);
+    /// <summary>Принимает весь остаток всех страниц закупки.</summary>
+    private Task ReceiveAll() => Receive(null);
+    /// <summary>Подтверждает необратимое в этом интерфейсе увеличение собственного склада.</summary>
+    private Task Receive(IReadOnlyList<ReceivePosition>? positions) => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Подтвердить фактическое получение товара? Остаток склада увеличится. Возврат этой приёмки пока не реализован.")) return; await Purchasing.ReceiveAsync(Id, Order!.Version, positions, OperationId, Cancellation.Token); await Load(); }, true);
+}
+
+

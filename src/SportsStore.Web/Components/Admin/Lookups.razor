@@ -1,0 +1,39 @@
+@page "/admin/lookups"
+@inherits AdminPageBase
+@inject IAdminCatalog Catalog
+@* Справочники собственного каталога; смешанные разделы поставщика не становятся брендами автоматически. *@
+<PageTitle>Категории и бренды</PageTitle><h1>Категории и бренды</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<div class="admin-filters"><label>Справочник<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Бренды</option><option value="categories">Категории</option></select></label><label>Название<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label></div>
+@if (Data is not null) {
+<div class="table-wrap lookup-table-wrap"><table><thead><tr><th>Название</th><th class="lookup-actions">Действия</th></tr></thead><tbody>@foreach (var row in Data.Items) { <tr><td>@row.Name</td><td class="lookup-actions"><AuthorizeView Policy="@AdminPolicies.Administrator"><button class="secondary" @onclick="() => Edit(row)">Изменить</button><button class="danger" disabled="@Busy" @onclick="() => Delete(row)">Удалить</button></AuthorizeView></td></tr> }</tbody></table></div>
+<div class="pager"><button disabled="@(Data.Page <= 1)" @onclick="() => GoPage(Data.Page - 1)">Назад</button><span>Найдено @Data.Total</span><button disabled="@(Data.Page * 25 >= Data.Total)" @onclick="() => GoPage(Data.Page + 1)">Далее</button></div>
+}
+<section class="admin-panel"><h2>@(Selected == Guid.Empty ? "Добавить запись" : "Изменить запись")</h2><form @onsubmit="Save" @onsubmit:preventDefault @onchange="() => Dirty = true"><label>Название<input @bind="Name" required maxlength="500" /></label>@if (Categories) { <LookupPicker Label="Родительская категория" Categories="true" @bind-Value="Parent" @bind-Value:after="() => Dirty = true" /> }<div class="admin-actions"><button disabled="@Busy">Сохранить</button><button class="secondary" type="button" @onclick="Clear">Новая запись</button></div></form><p class="hint">Изменение существующего справочника доступно Admin, поскольку оно может затронуть опубликованные карточки.</p></section>
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Тип текущего справочника из URL.</summary>
+    private bool Categories => Filter == "categories";
+    /// <summary>Страница справочника.</summary>
+    private AdminPage<LookupItem>? Data;
+    /// <summary>Редактируемая запись, пустой GUID создаёт новую.</summary>
+    private Guid Selected;
+    /// <summary>Версия выбранной записи.</summary>
+    private uint Version;
+    /// <summary>Название в форме.</summary>
+    private string Name = "";
+    /// <summary>Выбранный родитель категории.</summary>
+    private Guid? Parent;
+    /// <summary>Обновляет список при изменении фильтров.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Запрашивает одну страницу справочника.</summary>
+    private async Task Load() => Data = await Catalog.LookupsAsync(Categories, Query, Cancellation.Token);
+    /// <summary>Переносит снимок записи в форму.</summary>
+    private void Edit(LookupItem row) { Selected = row.Id; Version = row.Version; Name = row.Name; Parent = row.ParentId; Dirty = false; OperationId = Guid.NewGuid(); }
+    /// <summary>Очищает форму для новой записи.</summary>
+    private void Clear() { Selected = Guid.Empty; Version = 0; Name = ""; Parent = null; Dirty = false; OperationId = Guid.NewGuid(); }
+    /// <summary>Сохраняет справочник с серверной проверкой циклов и версии.</summary>
+    private Task Save() => RunAsync(async () => { await Catalog.SaveLookupAsync(Categories, new(Selected, Name, Version, Parent), OperationId, Cancellation.Token); Clear(); await Load(); }, true);
+    /// <summary>Удаляет запись только после подтверждения; сервер запрещает удаление зависимостей.</summary>
+    private Task Delete(LookupItem row) => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Удалить неиспользуемую запись справочника?")) return; await Catalog.DeleteLookupAsync(Categories, row.Id, row.Version, Guid.NewGuid(), Cancellation.Token); await Load(); }, true);
+}
+

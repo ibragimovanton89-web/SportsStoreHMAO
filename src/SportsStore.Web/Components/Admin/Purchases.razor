@@ -1,0 +1,42 @@
+@page "/admin/purchases"
+@inherits AdminPageBase
+@inject IPurchasing Purchasing
+@inject IAdminCommerce Commerce
+@* Действия строк используют общий стиль кнопок склада с отступом и выравниванием вправо. *@
+@* Основной вход в закупки: сохранённые заказы, новая сборка и ручные пороги поставщика. *@
+<PageTitle>Мои заказы поставщику</PageTitle>
+<h1>Мои заказы</h1><p>Выберите товары из прайса, оформите закупку и примите её на свой склад.</p>
+<PurchaseNavigation />
+<Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<section class="admin-panel"><div class="admin-filters"><label>Поставщик<select @bind="SupplierId" @bind:after="SupplierChanged">@foreach (var s in Suppliers) { <option value="@s.Id">@s.Name</option> }</select></label><button disabled="@(Busy || SupplierId == Guid.Empty)" @onclick="Start">Собрать заказ</button></div>
+<AuthorizeView Policy="@AdminPolicies.Administrator"><details><summary>Настроить суммы трёх уровней опта</summary><p>Порог относится к вашим закупкам. Пустое поле возвращает значение прайса. Уже созданные заказы сохраняют свои условия.</p><form @onsubmit="SaveTiers" @onsubmit:preventDefault @onchange="() => Dirty = true"><div class="form-grid">@for (var i = 0; i < Tiers.Count; i++) { var index = i; <label>@Tiers[i].Name · исходно @Money(Tiers[i].SourceMinimum)<input aria-label="@Tiers[i].Name" type="number" min="0" step="0.01" @bind="Minimums[index]" /></label> }</div><button disabled="@Busy">Сохранить пороги</button></form></details></AuthorizeView></section>
+<div class="admin-filters"><label>Номер заказа, код или название<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label><label>Статус<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Все</option>@foreach (var s in Enum.GetValues<PurchaseStatus>()) { <option value="@s">@PurchaseLabels.Status(s)</option> }</select></label></div>
+@if (Data is not null) { <div class="table-wrap"><table><thead><tr><th>Заказ</th><th>Поставщик / опт</th><th>Статус</th><th>Итоговая сумма</th><th></th></tr></thead><tbody>@foreach (var o in Data.Items) { <tr><td>@o.Number<small>@o.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</small></td><td>@o.Supplier<small>@o.TierName</small></td><td>@PurchaseLabels.Status(o.Status)</td><td>@Money(o.Total)</td><td><div class="stock-row-actions"><a class="button secondary" href="@($"/admin/purchases/{o.Id}")">Открыть / изменить</a><AuthorizeView Policy="@AdminPolicies.Administrator">@if (o.Status is PurchaseStatus.Draft or PurchaseStatus.Created or PurchaseStatus.Cancelled) { <button type="button" class="danger" disabled="@(Busy || Dirty)" @onclick="() => Delete(o)">Удалить</button> }</AuthorizeView></div></td></tr> }</tbody></table></div>
+@if (Data.Total == 0) { <p class="admin-empty">Заказов ещё нет. Нажмите «Собрать заказ».</p> }
+<div class="pager"><button disabled="@(Page <= 1)" @onclick="() => GoPage(Page - 1)">Назад</button><span>Всего @Data.Total</span><button disabled="@(Page * 25 >= Data.Total)" @onclick="() => GoPage(Page + 1)">Далее</button></div> }
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Удаляет выбранный заказ после явного подтверждения, затем обновляет список.</summary>
+    private Task Delete(PurchaseSummary order) => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", $"Удалить заказ {order.Number} и его состав без возможности восстановления? Карточки, цены и склад сохранятся.")) return; await Purchasing.DeleteAsync(order.Id, order.Version, OperationId, Cancellation.Token); Data = await Purchasing.OrdersAsync(Query, Cancellation.Token); }, true);
+    /// <summary>Текущая страница сохранённых закупок.</summary>
+    private AdminPage<PurchaseSummary>? Data;
+    /// <summary>Поставщики из базы.</summary>
+    private IReadOnlyList<SupplierData> Suppliers = [];
+    /// <summary>Выбранный поставщик новой сборки.</summary>
+    private Guid SupplierId;
+    /// <summary>Версии и исходные пороги трёх тарифов.</summary>
+    private IReadOnlyList<PurchaseTier> Tiers = [];
+    /// <summary>Редактируемые рублёвые пороги; null использует прайс.</summary>
+    private decimal?[] Minimums = [];
+    /// <summary>Загружает список и первоначального поставщика.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(async () => { Suppliers = await Commerce.SuppliersAsync(Cancellation.Token); if (SupplierId == Guid.Empty && Suppliers.Count > 0) { SupplierId = Suppliers[0].Id; await LoadTiers(); } Data = await Purchasing.OrdersAsync(Query, Cancellation.Token); });
+    /// <summary>Загружает настройки выбранного поставщика.</summary>
+    private async Task LoadTiers() { Tiers = await Purchasing.TiersAsync(SupplierId, Cancellation.Token); Minimums = Tiers.Select(t => t.ManualMinimum).ToArray(); }
+    /// <summary>Переключает форму тарифов.</summary>
+    private Task SupplierChanged() => RunAsync(async () => { await LoadTiers(); Dirty = false; });
+    /// <summary>Сохраняет явно введённые суммы в БД.</summary>
+    private Task SaveTiers() => RunAsync(async () => { await Purchasing.SaveTiersAsync(SupplierId, Tiers.Select((t, i) => t with { ManualMinimum = Minimums[i] }).ToArray(), OperationId, Cancellation.Token); await LoadTiers(); }, true);
+    /// <summary>Возвращает незавершённую сборку или начинает новую.</summary>
+    private Task Start() => RunAsync(async () => { if (Dirty) throw new InvalidOperationException("Сначала сохраните пороги."); var id = await Purchasing.StartAsync(SupplierId, OperationId, Cancellation.Token); Navigation.NavigateTo($"/admin/purchases/{id}"); }, true);
+}
+

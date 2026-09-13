@@ -1,0 +1,9 @@
+@* Сопоставляет адрес с Razor-страницей и применяет общий макет; неизвестный маршрут показывает страницу отсутствия. *@
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <Microsoft.AspNetCore.Components.Authorization.AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <NotAuthorized><p role="alert">Доступ ограничен. <a href="/account/login">Войти</a> или <a href="/account/setup">настроить двухфакторную защиту</a>.</p></NotAuthorized>
+        </Microsoft.AspNetCore.Components.Authorization.AuthorizeRouteView>
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>

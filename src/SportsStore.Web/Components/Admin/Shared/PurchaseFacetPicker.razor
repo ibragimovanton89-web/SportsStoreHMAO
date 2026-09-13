@@ -1,0 +1,33 @@
+@* Поиск внутри справочного фильтра выполняется локально; выбор обновляет URL и серверную выборку заказа. *@
+<div class="purchase-facet lookup-picker">
+    <span class="field-label">@Label</span>
+    <details class="lookup-dropdown" open="@Open" @onkeydown="KeyDown">
+        <summary title="@(string.IsNullOrEmpty(Value) ? "Все" : Value)" @onclick="() => Open = !Open" @onclick:preventDefault>@(string.IsNullOrEmpty(Value) ? "Все" : Value)<span aria-hidden="true">⌄</span></summary>
+        <div class="lookup-results">
+            <LiveSearch @bind-Value="Search" Label="@($"Поиск: {Label}")" Placeholder="Введите начало названия…" />
+            <div class="lookup-options"><button class="secondary" type="button" @onclick="() => Choose(null)">Все</button>
+                @foreach (var item in Items.Where(x => x.StartsWith(Search, StringComparison.OrdinalIgnoreCase)).Take(100))
+                { <button @key="item" type="button" class="@(item == Value ? "selected" : "secondary")" @onclick="() => Choose(item)">@item</button> }
+            </div>
+            @if (!Items.Any(x => x.StartsWith(Search, StringComparison.OrdinalIgnoreCase))) { <p class="hint">Совпадений нет.</p> }
+        </div>
+    </details>
+</div>
+@code {
+    /// <summary>Название фильтра в форме заказа.</summary>
+    [Parameter] public string Label { get; set; } = "Фильтр";
+    /// <summary>Значения из предложений текущего поставщика.</summary>
+    [Parameter] public IReadOnlyList<string> Items { get; set; } = [];
+    /// <summary>Точный выбранный признак; null или пустая строка означают отсутствие ограничения.</summary>
+    [Parameter] public string? Value { get; set; }
+    /// <summary>Передаёт выбранный признак для серверной фильтрации.</summary>
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    /// <summary>Открыта ли панель выбора.</summary>
+    private bool Open;
+    /// <summary>Начало названия для поиска внутри фильтра.</summary>
+    private string Search = "";
+    /// <summary>Закрывает панель и передаёт выбор, не затрагивая количества заказа.</summary>
+    private async Task Choose(string? value) { Open = false; Search = ""; await ValueChanged.InvokeAsync(value); }
+    /// <summary>Закрывает панель клавишей Escape; Tab и Enter обслуживаются браузером.</summary>
+    private void KeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") Open = false; }
+}

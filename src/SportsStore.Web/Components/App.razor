@@ -1,0 +1,27 @@
+@* Корневой HTML-документ Blazor: метаданные страницы, стили и маршрутизация. *@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="SportsStoreHMAO — оригинальные спортивные товары для розницы и оптовых закупок в ХМАО — Югре. Готовимся к открытию." />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["admin.css"]" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes @rendermode="AdminRenderMode" />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+</body>
+</html>
+
+@code {
+    /// <summary>HTTP-контекст первоначального документа; используется только для выбора интерактивности административного маршрута.</summary>
+    [CascadingParameter] public HttpContext HttpContext { get; set; } = default!;
+    /// <summary>Публичная главная остаётся SSR; административные маршруты получают серверную интерактивность.</summary>
+    private Microsoft.AspNetCore.Components.IComponentRenderMode? AdminRenderMode => HttpContext.Request.Path.StartsWithSegments("/admin")
+        ? new Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode(prerender: false) : null;
+}
+

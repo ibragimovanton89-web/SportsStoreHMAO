@@ -1,0 +1,24 @@
+@page "/admin/purchases/card/{OfferId:guid}"
+@inherits AdminPageBase
+@inject IPurchasing Purchasing
+@inject IAdminCatalog Catalog
+@* Создаёт собственную карточку только для позиции выбранной закупки или фактического склада. *@
+<PageTitle>Карточка из моей закупки</PageTitle><h1>Создать карточку товара</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Offer is not null) { <p>@Offer.Code · @Offer.Name</p><p>Единица продажи: <strong>@Offer.Unit</strong>. Содержимое упаковки автоматически не разделяется. Остаток переносится без повторного зачисления.</p><form class="admin-panel" @onsubmit="Create" @onsubmit:preventDefault @onchange="() => Dirty = true"><label>Собственное название<input @bind="Name" required maxlength="500" /></label><div class="form-grid"><LookupPicker Label="Бренд" AllowNew="true" @bind-Text="BrandName" @bind-Text:after="() => Dirty = true" @bind-Value="BrandId" @bind-Value:after="() => Dirty = true" /><LookupPicker Label="Категория" Categories="true" AllowNew="true" @bind-Text="CategoryName" @bind-Text:after="() => Dirty = true" @bind-Value="CategoryId" @bind-Value:after="() => Dirty = true" /></div><button disabled="@Busy">Создать черновик и открыть карточку</button></form> }
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Выбранная поставщицкая позиция из маршрута.</summary>
+    [Parameter] public Guid OfferId { get; set; }
+    /// <summary>Исходные сведения без изменения прайса.</summary>
+    private OfferData? Offer;
+    /// <summary>Собственное название будущей карточки.</summary>
+    private string Name = "";
+    /// <summary>Справочники, выбранные сотрудником без догадок из заголовков прайса.</summary>
+    private Guid? BrandId, CategoryId;
+    /// <summary>Редактируемые признаки прайса; создаются в справочниках только при сохранении.</summary>
+    private string? BrandName, CategoryName;
+    /// <summary>Подставляет название как редактируемое предложение.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(async () => { Offer = await Catalog.OfferAsync(OfferId, Cancellation.Token); Name = Offer.Name.Length <= 500 ? Offer.Name : Offer.Name[..500]; BrandId = CategoryId = null; (BrandName, CategoryName) = await Catalog.SuggestLookupsAsync(OfferId, false, Cancellation.Token); });
+    /// <summary>Атомарно создаёт карточку и переносит накопленный собственный остаток.</summary>
+    private Task Create() => RunAsync(async () => { var id = await Purchasing.CreateCardAsync(OfferId, Name, BrandId, CategoryId, OperationId, Cancellation.Token, BrandName, CategoryName); Dirty = false; Navigation.NavigateTo($"/admin/stock/products/{id}"); }, true);
+}

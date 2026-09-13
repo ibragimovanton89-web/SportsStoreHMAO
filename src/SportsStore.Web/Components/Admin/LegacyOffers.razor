@@ -1,0 +1,9 @@
+@page "/admin/offers"
+@inherits AdminPageBase
+@* Совместимость старых закладок: единый раздел с сохранением фильтров и поиска. *@
+<p>Открываем обновлённый раздел…</p>
+@code {
+    /// <summary>Заменяет старый адрес в истории браузера, сохраняя строку запроса.</summary>
+    protected override void OnParametersSet() => Navigation.NavigateTo("/admin/purchases", replace: true);
+}
+

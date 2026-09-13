@@ -1,0 +1,46 @@
+@* Поиск после паузы ввода: новые запросы отменяют ожидание старых, обработчики выполняются последовательно. *@
+@implements IDisposable
+<span class="live-search">
+    <input type="search" form="@SearchForm" value="@Value" @oninput="Input" @onchange:stopPropagation placeholder="@Placeholder" aria-label="@Label" disabled="@Disabled" maxlength="500" autocomplete="off" />
+    <span class="search-symbol" aria-hidden="true">⌕</span>
+</span>
+@code {
+    /// <summary>Отсоединяет поиск от внешней формы: Enter не должен сохранять редактируемую карточку.</summary>
+    private readonly string SearchForm = "search-only-" + Guid.NewGuid().ToString("N");
+    /// <summary>Введённый текст, синхронизируемый с формой.</summary>
+    [Parameter] public string? Value { get; set; }
+    /// <summary>Передаёт текст до выполнения поиска.</summary>
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    /// <summary>Обновляет результаты после паузы в 300 миллисекунд.</summary>
+    [Parameter] public EventCallback OnSearch { get; set; }
+    /// <summary>Подсказка допустимого запроса.</summary>
+    [Parameter] public string Placeholder { get; set; } = "Начните вводить…";
+    /// <summary>Доступная подпись поля для экранного диктора.</summary>
+    [Parameter] public string Label { get; set; } = "Поиск";
+    /// <summary>Блокирует поиск при несохранённых условиях заказа.</summary>
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>Отменяет предыдущую задержку и ожидание обработчика.</summary>
+    private CancellationTokenSource? Pending;
+    /// <summary>Исключает параллельное обновление списка двумя запросами.</summary>
+    private readonly SemaphoreSlim Gate = new(1, 1);
+    /// <summary>Передаёт текст сразу; запускает только последний ожидающий запрос.</summary>
+    /// <param name="args">Текущее содержимое поискового поля.</param>
+    private async Task Input(ChangeEventArgs args)
+    {
+        Pending?.Cancel();
+        using var request = new CancellationTokenSource();
+        Pending = request;
+        try
+        {
+            await ValueChanged.InvokeAsync(args.Value?.ToString() ?? "");
+            await Task.Delay(300, request.Token);
+            await Gate.WaitAsync(request.Token);
+            try { request.Token.ThrowIfCancellationRequested(); await OnSearch.InvokeAsync(); }
+            finally { Gate.Release(); }
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+        finally { if (ReferenceEquals(Pending, request)) Pending = null; }
+    }
+    /// <summary>Отменяет ожидающий запрос при уходе со страницы.</summary>
+    public void Dispose() { Pending?.Cancel(); GC.SuppressFinalize(this); }
+}

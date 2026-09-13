@@ -1,0 +1,11 @@
+@* Шапка магазина: регион из проверенной конфигурации, бренд и навигация по главной странице. *@
+@using Microsoft.Extensions.Options
+@using SportsStore.Web.Configuration
+@inject IOptions<StoreOptions> Store
+<div class="region-bar"><div class="container"><span><span class="status-dot"></span> @Store.Value.Region</span><span>Территория спорта. Территория своих.</span></div></div>
+<header class="container header">
+    <a class="brand" href="/" aria-label="SportsStoreHMAO — главная"><span class="brand-mark" aria-hidden="true">S<span>/</span></span><span>SPORTSSTORE<small>HMAO / ЮГРА</small></span></a>
+    <nav aria-label="Основная навигация"><a href="/catalog">Товары</a><a href="/#about">О магазине</a><a href="/#formats">Розница и опт</a></nav>
+    <span class="opening"><span class="status-dot"></span> Скоро открытие</span>
+</header>
+

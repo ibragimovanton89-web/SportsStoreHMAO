@@ -1,0 +1,12 @@
+@* Общее доступное сообщение о загрузке, ошибке или подтверждении операции. *@
+@if (Busy) { <p role="status">Выполняется операция…</p> }
+@if (Error is not null) { <p class="admin-error" role="alert">@Error</p> }
+@if (Success is not null) { <p class="admin-success" role="status">@Success</p> }
+@code {
+    /// <summary>Операция выполняется.</summary>
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Понятная ошибка.</summary>
+    [Parameter] public string? Error { get; set; }
+    /// <summary>Подтверждение.</summary>
+    [Parameter] public string? Success { get; set; }
+}

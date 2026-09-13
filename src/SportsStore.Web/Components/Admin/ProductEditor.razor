@@ -1,0 +1,146 @@
+@page "/admin/stock/products/new"
+@page "/admin/stock/products/{Id:guid}"
+@page "/admin/products/new"
+@page "/admin/products/{Id:guid}"
+@inherits AdminPageBase
+@inject IAdminCatalog Catalog
+@inject IAdminImages Images
+@inject IPurchasing Purchasing
+@* Собственная карточка редактируется DTO-командами; публикация, варианты и фотографии — явные отдельные действия. *@
+<PageTitle>Карточка товара</PageTitle><div class="page-heading"><h1>@(Id == Guid.Empty ? "Новый черновик" : "Карточка товара")</h1><a href="/admin/stock">← Мой склад</a></div>
+<Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Ready) {
+<section class="admin-panel"><form @onsubmit="SaveProduct" @onsubmit:preventDefault @onchange="MarkProductChanged"><label>Название<input @bind="Name" required maxlength="500" /></label><label>Описание<textarea @bind="Description" maxlength="8000"></textarea></label><div class="form-grid"><LookupPicker Label="Бренд" AllowNew="true" @bind-Text="BrandName" @bind-Text:after="MarkProductChanged" Value="BrandId" ValueChanged="BrandChanged" /><LookupPicker Label="Категория" Categories="true" AllowNew="true" @bind-Text="CategoryName" @bind-Text:after="MarkProductChanged" Value="CategoryId" ValueChanged="CategoryChanged" /></div><div class="admin-actions"><button disabled="@Busy">Сохранить карточку</button><button type="button" class="secondary" disabled="@Busy" @onclick="Reload">Обновить сведения с сервера</button></div></form></section>
+@if (Id != Guid.Empty) {
+<section class="admin-panel"><div class="page-heading"><h2>Варианты продажи</h2><button type="button" class="secondary" disabled="@Busy" @onclick="DiscardVariant">Добавить вариант</button></div><p class="hint">Даже товар без размеров и цветов имеет один вариант. Связь с закупкой устанавливается автоматически при создании карточки из заказа.</p>
+<div class="table-wrap"><table><thead><tr><th>SKU</th><th>Единица</th><th>Размер и цвет</th><th>Действие</th></tr></thead><tbody>@foreach (var v in Variants) { <tr><td>@v.Sku</td><td>@v.Unit</td><td>@v.Size @v.Color</td><td><button class="secondary" @onclick="() => EditVariant(v)">Изменить</button></td></tr> }</tbody></table></div>
+@if (VariantFormOpen) {
+<form @onsubmit="SaveVariant" @onsubmit:preventDefault @onchange="MarkVariantChanged"><h3>@(VariantId == Guid.Empty ? "Новый вариант" : "Редактирование варианта")</h3><div class="form-grid variant-form-grid"><div class="sku-field"><label for="variant-sku">Внутренний SKU</label><div class="sku-input-row"><input id="variant-sku" @bind="Sku" @bind:event="oninput" @bind:after="MarkVariantChanged" required maxlength="500" />@if (VariantId == Guid.Empty) { <button type="button" class="secondary" disabled="@Busy" @onclick="GenerateSku">Сгенерировать</button> }</div>@if (VariantId == Guid.Empty) { <p class="hint">Введите свой код или сгенерируйте его, затем сохраните вариант.</p> }</div><label>Единица продажи<select @bind="Unit"><option>шт</option><option>пар</option><option>компл</option><option>упак</option></select></label><label>Размер<input @bind="Size" maxlength="500" /></label><label>Цвет<input @bind="Color" maxlength="500" /></label><label>Артикул производителя<input @bind="Manufacturer" maxlength="500" /></label><label>Штрихкод<input @bind="Barcode" maxlength="500" /></label></div><div class="admin-actions"><button disabled="@Busy">Сохранить вариант</button></div></form>
+} else { <p class="hint">Выберите «Изменить» у нужного варианта или нажмите «Добавить вариант».</p> }
+</section>
+<AuthorizeView Policy="@AdminPolicies.Administrator">@foreach (var v in Variants) { <div @key="v.Id"><PurchaseRetailEditor VariantId="v.Id" Sku="@v.Sku" Saved="RefreshProblems" />@foreach (var minimum in WholesaleQuantities.GetValueOrDefault(v.Id) ?? new decimal[] { 1 }) { <PurchaseRetailEditor @key="minimum" VariantId="v.Id" Sku="@v.Sku" Segment="CustomerSegment.Wholesale" MinimumQuantity="minimum" Saved="RefreshProblems" /> }</div> }</AuthorizeView>
+<section class="admin-panel"><h2>Фотографии</h2><p class="hint">JPEG, PNG или WebP до 5 МиБ, до 16 мегапикселей. Изображение проверяется и перекодируется сервером. Перед загрузкой сохраните изменения формы.</p><label>Выбрать фотографию<InputFile OnChange="UploadImage" accept="image/jpeg,image/png,image/webp" disabled="@(Busy || Dirty)" /></label><div class="image-grid">@foreach (var image in Photos) { <figure><img src="@image.Url" alt="Фотография товара" /><figcaption><button disabled="@(Busy || Dirty)" @onclick="() => Move(image, -1)" aria-label="Переместить раньше">←</button><button disabled="@(Busy || Dirty)" @onclick="() => Move(image, 1)" aria-label="Переместить позже">→</button><button class="danger" disabled="@(Busy || Dirty)" @onclick="() => DeleteImage(image)">Удалить</button></figcaption></figure> }</div></section>
+<section class="admin-panel"><h2>Готовность к публикации</h2><p>Текущий статус: @StatusLabel</p>@if (Problems.Count == 0) { <p>Обязательные данные заполнены.</p> } else { <ul>@foreach (var problem in Problems) { <li>@problem</li> }</ul> }
+<AuthorizeView Policy="@AdminPolicies.Administrator"><div class="admin-actions"><button disabled="@(Busy || Dirty || Problems.Count > 0)" @onclick="() => ChangeStatus(ProductStatus.Published)">Опубликовать</button><button class="secondary" disabled="@(Busy || Dirty)" @onclick="() => ChangeStatus(ProductStatus.Draft)">Вернуть в черновик</button><button class="danger" disabled="@(Busy || Dirty)" @onclick="() => ChangeStatus(ProductStatus.Archived)">В архив</button></div></AuthorizeView><p class="hint">Наличие на складе и в пути определяется из приёмок и закупок автоматически. После публикации карточка доступна покупателям в разделе «Товары».</p></section>
+@if (Status == ProductStatus.Published) { <p><a href="@($"/catalog/{Id}")" target="_blank">Открыть карточку на сайте ↗</a></p> }
+<details class="admin-panel"><summary>Внутренний предпросмотр карточки</summary><h2>@Name</h2>@if (Photos.Count > 0) { <img src="@Photos[0].Url" width="240" alt="Основная фотография товара" /> }<p>@Description</p><ul>@foreach (var v in Variants) { <li>@v.Sku · @v.Size @v.Color · @v.Unit</li> }</ul></details>
+}
+}
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Карточка из маршрута; пустой GUID создаёт новую.</summary>
+    [Parameter] public Guid Id { get; set; }
+    /// <summary>Первичные сведения загружены.</summary>
+    private bool Ready;
+    /// <summary>Несохранённые поля карточки, которые нельзя потерять при сохранении варианта.</summary>
+    private bool ProductDirty;
+    /// <summary>Несохранённые поля отдельного варианта.</summary>
+    private bool VariantDirty;
+    /// <summary>Показывает форму после автоматического выбора единственного варианта или явного действия сотрудника.</summary>
+    private bool VariantFormOpen;
+    /// <summary>Карточка, для которой загружена форма; переход к другому товару сбрасывает прежний выбор.</summary>
+    private Guid? LoadedProductId;
+    /// <summary>Отмечает изменение карточки и предупреждение при навигации.</summary>
+    private void MarkProductChanged() { ProductDirty = true; Dirty = true; }
+    /// <summary>Отмечает изменение варианта отдельно от карточки.</summary>
+    private void MarkVariantChanged() { VariantDirty = true; Dirty = true; }
+    /// <summary>Открывает создание нового варианта; перед очисткой несохранённых полей запрашивает подтверждение.</summary>
+    private async Task DiscardVariant() { if (!VariantDirty || await JS.InvokeAsync<bool>("confirm", "Очистить несохранённый вариант?")) { ClearVariant(); VariantFormOpen = true; VariantDirty = false; Dirty = ProductDirty; OperationId = Guid.NewGuid(); } }
+    /// <summary>Сохранённая версия карточки для проверки конкуренции.</summary>
+    private uint Version;
+    /// <summary>Фактический статус; не отправляется как часть разрешения публикации.</summary>
+    private ProductStatus Status;
+    /// <summary>Редактируемые текстовые поля карточки.</summary>
+    private string Name = "", Description = "";
+    /// <summary>Явные ссылки на справочники.</summary>
+    private Guid? BrandId, CategoryId;
+    /// <summary>Предложенные или введённые названия; существующие привязки карточки ими не заменяются.</summary>
+    private string? BrandName, CategoryName;
+    /// <summary>Ограниченные варианты карточки.</summary>
+    private IReadOnlyList<VariantData> Variants = [];
+    /// <summary>Существующие оптовые ступени по SKU; базовый порог один включён всегда.</summary>
+    private readonly Dictionary<Guid, IReadOnlyList<decimal>> WholesaleQuantities = new();
+    /// <summary>Фотографии карточки.</summary>
+    private IReadOnlyList<ImageData> Photos = [];
+    /// <summary>Конкретные причины запрета публикации.</summary>
+    private IReadOnlyList<string> Problems = [];
+    /// <summary>Идентификатор и версия редактируемого варианта.</summary>
+    private Guid VariantId;
+    /// <summary>Версия варианта из формы.</summary>
+    private uint VariantVersion;
+    /// <summary>Поля отдельной формы варианта.</summary>
+    private string Sku = "", Unit = "шт", Size = "", Color = "", Manufacturer = "", Barcode = "";
+    /// <summary>Русское название текущего статуса.</summary>
+    private string StatusLabel => Status switch { ProductStatus.Draft => "Черновик", ProductStatus.Published => "Опубликован", _ => "Архив" };
+    /// <summary>Читает карточку при переходе по маршруту.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Обновляет снимок карточки и связанные ограниченные данные.</summary>
+    private async Task Load()
+    {
+        if (LoadedProductId != Id)
+        {
+            ClearVariant(); VariantFormOpen = false; ProductDirty = VariantDirty = Dirty = false;
+            Variants = []; Photos = []; Problems = []; WholesaleQuantities.Clear();
+            Name = Description = ""; BrandId = CategoryId = null; BrandName = CategoryName = null;
+            Version = 0; Status = ProductStatus.Draft; LoadedProductId = Id;
+        }
+        if (Id != Guid.Empty)
+        {
+            var p = await Catalog.ProductAsync(Id, Cancellation.Token); Version = p.Version; Name = p.Name; Description = p.Description ?? ""; BrandId = p.BrandId; CategoryId = p.CategoryId; Status = p.Status;
+            var suggested = await Catalog.SuggestLookupsAsync(Id, true, Cancellation.Token);
+            BrandName = BrandId is null ? suggested.Brand : null;
+            CategoryName = CategoryId is null ? suggested.Category : null;
+            Variants = await Catalog.VariantsAsync(Id, Cancellation.Token); Photos = await Images.ListAsync(Id, Cancellation.Token); Problems = await Catalog.PublicationProblemsAsync(Id, Cancellation.Token);
+        }
+        foreach (var variant in Variants) WholesaleQuantities[variant.Id] = await Purchasing.WholesaleQuantitiesAsync(variant.Id, Cancellation.Token);
+        // Явно открытая пустая форма не подменяется существующим вариантом при сохранении карточки.
+        if (!VariantDirty)
+        {
+            var selected = Variants.FirstOrDefault(v => v.Id == VariantId);
+            if (selected is not null) EditVariant(selected);
+            else if (!VariantFormOpen && Variants.Count == 1) EditVariant(Variants[0]);
+            else if (!VariantFormOpen && Variants.Count == 0) { ClearVariant(); VariantFormOpen = true; }
+        }
+        Ready = true;
+    }
+    /// <summary>Обновляет готовность после изменения цены, сохраняя локальные поля карточки.</summary>
+    private async Task RefreshProblems() => Problems = await Catalog.PublicationProblemsAsync(Id, Cancellation.Token);
+    /// <summary>Отмечает явное изменение бренда.</summary>
+    private void BrandChanged(Guid? id) { BrandId = id; MarkProductChanged(); }
+    /// <summary>Отмечает явное изменение категории.</summary>
+    private void CategoryChanged(Guid? id) { CategoryId = id; MarkProductChanged(); }
+    /// <summary>Обновляет сведения только с подтверждением потери локальной формы.</summary>
+    private async Task Reload() { if (!Dirty || await JS.InvokeAsync<bool>("confirm", "Заменить форму актуальными данными сервера?")) await RunAsync(async () => { ProductDirty = VariantDirty = Dirty = false; ClearVariant(); VariantFormOpen = false; await Load(); }); }
+    /// <summary>Сохраняет собственную карточку; при конфликте RunAsync оставляет форму без изменений.</summary>
+    private Task SaveProduct() => RunAsync(async () =>
+    {
+        if (VariantDirty) throw new InvalidOperationException("Сначала сохраните или очистите изменения варианта.");
+        var id = await Catalog.SaveProductAsync(new(Id, Version, Name, Description, BrandId, CategoryId, Status) { BrandName = BrandName, CategoryName = CategoryName }, OperationId, Cancellation.Token);
+        ProductDirty = false;
+        if (Id == Guid.Empty) { Dirty = false; Navigation.NavigateTo($"/admin/stock/products/{id}"); } else await Load();
+    }, true);
+    /// <summary>Открывает существующий вариант с его SKU и остальными полями без отметки о несохранённых изменениях.</summary>
+    /// <param name="v">Снимок выбранного варианта; версия используется при сохранении.</param>
+    private void EditVariant(VariantData v) { if (VariantDirty) { Error = "Сначала сохраните или очистите текущий вариант."; return; } VariantFormOpen = true; VariantId = v.Id; VariantVersion = v.Version; Sku = v.Sku; Unit = v.Unit; Size = v.Size ?? ""; Color = v.Color ?? ""; Manufacturer = v.ManufacturerCode ?? ""; Barcode = v.Barcode ?? ""; OperationId = Guid.NewGuid(); }
+    /// <summary>Заполняет SKU только нового варианта, сохраняя остальные поля; заменяет введённый код после подтверждения.</summary>
+    private Task GenerateSku() => RunAsync(async () =>
+    {
+        if (VariantId != Guid.Empty) return;
+        if (!string.IsNullOrWhiteSpace(Sku) && !await JS.InvokeAsync<bool>("confirm", "Заменить введённый SKU новым сгенерированным кодом?")) return;
+        Sku = await Catalog.GenerateSkuAsync(Id, Cancellation.Token);
+        MarkVariantChanged();
+    });
+    /// <summary>Готовит пустую форму нового варианта.</summary>
+    private void ClearVariant() { VariantId = Guid.Empty; VariantVersion = 0; Sku = ""; Unit = "шт"; Size = Color = Manufacturer = Barcode = ""; }
+    /// <summary>Сохраняет вариант и оставляет его открытым с актуальными SKU и версией, перечитывая готовность публикации.</summary>
+    private Task SaveVariant() => RunAsync(async () => { if (ProductDirty) throw new InvalidOperationException("Сначала сохраните изменения карточки."); VariantId = await Catalog.SaveVariantAsync(new(VariantId, VariantVersion, Id, Sku, Unit, Size, Color, Manufacturer, Barcode), OperationId, Cancellation.Token); VariantDirty = false; await Load(); }, true);
+    /// <summary>Передаёт ограниченный поток браузера серверному декодеру, не доверяя расширению и имени.</summary>
+    private Task UploadImage(InputFileChangeEventArgs e) => RunAsync(async () => { await using var stream = e.File.OpenReadStream(5 * 1024 * 1024, Cancellation.Token); await Images.UploadAsync(Id, Version, stream, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Удаляет изображение после подтверждения.</summary>
+    private Task DeleteImage(ImageData image) => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Удалить фотографию?")) return; await Images.DeleteAsync(image.Id, image.Version, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Сохраняет порядок фотографий с версией выбранной фотографии.</summary>
+    private Task Move(ImageData image, int direction) => RunAsync(async () => { await Images.MoveAsync(image.Id, image.Version, direction, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Публикует или архивирует по явному подтверждению Admin.</summary>
+    private Task ChangeStatus(ProductStatus status) => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Изменить статус карточки?")) return; await Catalog.SetStatusAsync(Id, Version, status, OperationId, Cancellation.Token); await Load(); }, true);
+}
+

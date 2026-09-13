@@ -1,0 +1,19 @@
+@page "/admin"
+@inherits AdminPageBase
+@inject IAdminCatalog Catalog
+@* Обзор показывает реальные счётчики и доступный следующий шаг. *@
+<PageTitle>Обзор — управление магазином</PageTitle><h1>Обзор магазина</h1><p class="admin-lead">Собственный каталог, закупки и решения по ценам.</p>
+<Feedback Busy="Busy" Error="@Error" />
+@if (Data is not null) {
+<div class="admin-stats"><a href="/admin/stock?filter=Draft"><strong>@Data.Drafts</strong>Черновики товаров</a><a href="/admin/stock?filter=Published"><strong>@Data.Published</strong>Опубликовано</a><a href="/admin/purchases"><strong>@Data.Unmapped</strong>Без сопоставления</a><a href="/admin/imports?filter=Invalid"><strong>@Data.InvalidBatches</strong>Ошибочные прайсы</a></div>
+<section class="admin-panel"><h2>От закупки — к своему складу</h2><p>В «Мои заказы» выберите товары из прайса и оформите закупку. В «Мой склад» редактируйте карточки, цены и публикацию, проверяйте наличие.</p><a class="button" href="/admin/purchases">Мои заказы →</a></section>
+}
+@code {
+    /// <summary>Последний прочитанный снимок счётчиков.</summary>
+    private AdminOverview? Data;
+    /// <summary>Загружает счётчики через авторизованный сервис.</summary>
+    protected override Task OnInitializedAsync() => RunAsync(async () => Data = await Catalog.OverviewAsync(Cancellation.Token));
+}
+
+
+

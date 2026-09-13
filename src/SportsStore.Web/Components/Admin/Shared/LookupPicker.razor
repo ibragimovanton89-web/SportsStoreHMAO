@@ -1,0 +1,103 @@
+@* Раскрывающийся поиск справочника: сохранённое значение видно отдельно от поискового текста, выбор всегда явный. *@
+@inject IAdminCatalog Catalog
+<div class="lookup-picker">
+    <span class="field-label">@Label</span>
+    <details class="lookup-dropdown" open="@Open" @onkeydown="KeyDown">
+        <summary @onclick="Toggle" @onclick:preventDefault>@(Value is null && !string.IsNullOrWhiteSpace(Text) ? Text : SelectedName) <span aria-hidden="true">⌄</span></summary>
+        <div class="lookup-results">
+            <LiveSearch @bind-Value="SearchText" OnSearch="Load" Label="@($"Поиск: {Label}")" Placeholder="Введите первые буквы…" />
+            @if (AllowNew && !string.IsNullOrWhiteSpace(SearchText))
+            {
+                <button type="button" class="secondary" @onclick="ChooseText">Использовать «@SearchText»</button>
+                <p class="hint">Название будет записано в справочник при сохранении карточки.</p>
+            }
+            <p class="hint" role="status">@(Loading ? "Ищем…" : $"Найдено: {Total}. Показано: {Items.Count}.")</p>
+            <div class="lookup-options" aria-label="@($"Результаты: {Label}")">
+                <button type="button" class="secondary" @onclick="() => Choose(null)">Без значения</button>
+                @foreach (var item in Items)
+                {
+                    <button @key="item.Id" type="button" class="@(item.Id == Value ? "selected" : "secondary")" @onclick="() => Choose(item)">@item.Name @(item.Id == Value ? "✓" : "")</button>
+                }
+            </div>
+            @if (!Loading && Items.Count == 0) { <p class="hint">Совпадений нет. Попробуйте другое начало названия.</p> }
+            @if (Error is not null) { <p class="admin-error" role="alert">@Error</p> }
+        </div>
+    </details>
+</div>
+@code {
+    /// <summary>Разрешает ввод нового названия с отложенным созданием записи при сохранении карточки.</summary>
+    [Parameter] public bool AllowNew { get; set; }
+    /// <summary>Предложенное или введённое название, пока ещё не связанное с ID справочника.</summary>
+    [Parameter] public string? Text { get; set; }
+    /// <summary>Передаёт ручное название родительской форме; null снимает отложенное создание.</summary>
+    [Parameter] public EventCallback<string?> TextChanged { get; set; }
+    /// <summary>Название справочника, отображаемое над выбором.</summary>
+    [Parameter] public string Label { get; set; } = "Справочник";
+    /// <summary>True выбирает категории, false — бренды.</summary>
+    [Parameter] public bool Categories { get; set; }
+    /// <summary>Сохранённый идентификатор; null означает отсутствие привязки.</summary>
+    [Parameter] public Guid? Value { get; set; }
+    /// <summary>Передаёт явно выбранное значение родительской форме.</summary>
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    /// <summary>Начало названия для серверного поиска без учёта регистра.</summary>
+    private string SearchText = "";
+    /// <summary>Читаемое название выбранной записи, даже если она вне первой страницы.</summary>
+    private string SelectedName = "Выберите значение";
+    /// <summary>Последняя прочитанная привязка и тип справочника.</summary>
+    private (Guid?, bool)? LoadedSelection;
+    /// <summary>Открыта ли панель результатов.</summary>
+    private bool Open;
+    /// <summary>Отображает состояние загрузки подсказок.</summary>
+    private bool Loading;
+    /// <summary>Количество совпадений до ограничения страницы.</summary>
+    private int Total;
+    /// <summary>Не более 25 подходящих записей.</summary>
+    private IReadOnlyList<LookupItem> Items = [];
+    /// <summary>Безопасное сообщение без технических подробностей.</summary>
+    private string? Error;
+    /// <summary>Читает название текущего выбора только при изменении привязки.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (LoadedSelection == (Value, Categories)) return;
+        LoadedSelection = (Value, Categories);
+        try { SelectedName = Value is Guid id ? (await Catalog.LookupAsync(Categories, id))?.Name ?? "Запись недоступна" : "Выберите значение"; }
+        catch { SelectedName = "Не удалось прочитать выбор"; }
+    }
+    /// <summary>Открывает поиск с первой страницей или закрывает его без изменения выбора.</summary>
+    private async Task Toggle() { Open = !Open; if (Open) { if (AllowNew) SearchText = Text ?? (Value is not null ? SelectedName : ""); await Load(); } }
+    /// <summary>Закрывает раскрывающуюся панель клавишей Escape.</summary>
+    /// <param name="args">Нажатая клавиша; Tab и Enter обрабатывает браузер.</param>
+    private void KeyDown(KeyboardEventArgs args) { if (args.Key == "Escape") Open = false; }
+    /// <summary>Обновляет подсказки; устаревший ответ не подменяет результаты нового текста.</summary>
+    private async Task Load()
+    {
+        var text = SearchText;
+        Loading = true;
+        Items = [];
+        try
+        {
+            var result = await Catalog.LookupsAsync(Categories, new(text));
+            if (text != SearchText) return;
+            Items = result.Items; Total = result.Total; Error = null;
+        }
+        catch { Error = "Не удалось загрузить справочник. Проверьте соединение."; }
+        finally { Loading = false; }
+    }
+    /// <summary>Подтверждает ручной текст только в форме; справочник здесь не изменяется.</summary>
+    private async Task ChooseText()
+    {
+        if (!AllowNew || string.IsNullOrWhiteSpace(SearchText)) return;
+        Open = false;
+        await ValueChanged.InvokeAsync(null);
+        await TextChanged.InvokeAsync(SearchText.Trim());
+    }
+    /// <summary>Закрывает список и сохраняет только явно выбранную запись.</summary>
+    /// <param name="item">Выбранная запись либо null для снятия привязки.</param>
+    private async Task Choose(LookupItem? item)
+    {
+        SelectedName = item?.Name ?? "Выберите значение";
+        Open = false;
+        await TextChanged.InvokeAsync(null);
+        await ValueChanged.InvokeAsync(item?.Id);
+    }
+}

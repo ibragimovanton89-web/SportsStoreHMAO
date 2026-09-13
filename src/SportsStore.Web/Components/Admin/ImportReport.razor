@@ -1,0 +1,36 @@
+@page "/admin/imports/{Id:guid}"
+@inherits AdminPageBase
+@inject IAdminImport Import
+@using SportsStore.Application.Import
+@* Отчёт читается из сохранённого staging, в том числе после удаления XLS и перезапуска. *@
+<PageTitle>Проверка прайса</PageTitle><h1>Результат проверки прайса</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Report is not null) {
+<section class="admin-panel"><h2>Прайс от @Report.SourceDate.ToString("dd.MM.yyyy")</h2><p>Статус: <strong>@Status</strong></p><p>Новые: @Report.New · Изменённые: @Report.Changed · Без изменений: @Report.Unchanged · Ошибки: @Report.Errors</p><p>Товарных строк: @Report.Products · Неизвестных остатков: @Report.UnknownStock</p><div class="admin-actions"><button disabled="@Busy" class="secondary" @onclick="Refresh">Обновить фактический статус</button><button disabled="@(Busy || Report.Status == ImportStatus.Applied)" @onclick="Repreview">Повторить проверку</button><AuthorizeView Policy="@AdminPolicies.Administrator"><button disabled="@(Busy || Report.Status != ImportStatus.Preview || Report.Errors != 0)" @onclick="Apply">Применить прайс</button></AuthorizeView></div><p class="hint">Если соединение прервалось, сначала обновите статус. Устаревшую проверку нужно повторить. Более старую дату прайса применять нельзя. Автоприменение собственных цен учитывается только при явно включённой настройке Admin.</p></section>
+}
+<div class="admin-filters"><label>Строки<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Все товарные строки</option><option value="changed">Изменённые</option><option value="errors">Ошибочные</option></select></label><label>Код или название<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label></div>
+@if (Rows is not null) {
+<div class="table-wrap"><table><thead><tr><th>Строка</th><th>Код / позиция</th><th>Прежние закупочные цены</th><th>Цены файла</th><th>Проверка</th></tr></thead><tbody>@foreach (var row in Rows.Items) { <tr><td>@row.Number</td><td>@row.Code<br />@row.Name</td><td>@Prices(row.OldPrices)</td><td>@Prices(row.NewPrices)</td><td>@row.Result<small>@row.Problem</small></td></tr> }</tbody></table></div><p class="hint">Порядок цен: мелкий опт / опт / крупный опт. «—» означает отсутствие цены, а не ноль. Для партий прежнего этапа снимок цен до проверки мог не сохраняться.</p><div class="pager"><button disabled="@(Rows.Page <= 1 || Busy)" @onclick="() => GoPage(Rows.Page - 1)">Назад</button><span>Найдено @Rows.Total</span><button disabled="@(Rows.Page * 25 >= Rows.Total || Busy)" @onclick="() => GoPage(Rows.Page + 1)">Далее</button></div>
+}
+@code {
+    /// <summary>Идентификатор сохранённой партии.</summary>
+    [Parameter] public Guid Id { get; set; }
+    /// <summary>Агрегированный отчёт без тысяч строк.</summary>
+    private BatchReport? Report;
+    /// <summary>Текущая страница сравнения.</summary>
+    private AdminPage<ImportChangeData>? Rows;
+    /// <summary>Русский статус.</summary>
+    private string Status => Report?.Status switch { ImportStatus.Applied => "Применена", ImportStatus.Invalid => "Есть ошибки", _ => "Проверена, ожидает применения" };
+    /// <summary>Читает фактический статус при каждом открытии, не повторяя изменения вслепую.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Запрашивает агрегаты и одну страницу сравнения.</summary>
+    private async Task Load() { Report = await Import.ReportAsync(Id, Cancellation.Token); Rows = await Import.ChangesAsync(Id, Query, Cancellation.Token); }
+    /// <summary>Обновляет только чтение.</summary>
+    private Task Refresh() => RunAsync(Load);
+    /// <summary>Актуализирует staging после изменения ревизии поставщика.</summary>
+    private Task Repreview() => RunAsync(async () => { await Import.RepreviewAsync(Id, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Применяет только по подтверждению Admin; сервер повторно проверяет права.</summary>
+    private Task Apply() => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Применить проверенный закупочный прайс? Изменятся предложения и история закупочных цен.")) return; await Import.ApplyAsync(Id, OperationId, Cancellation.Token); await Load(); }, true);
+    /// <summary>Форматирует три цены без технического JSON.</summary>
+    private static string Prices(IReadOnlyList<decimal?> values) => values.Count == 0 ? "Нет снимка" : string.Join(" / ", values.Select(Money));
+}
+

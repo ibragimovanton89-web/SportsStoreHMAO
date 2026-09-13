@@ -1,0 +1,35 @@
+@page "/admin/stock"
+@inherits AdminPageBase
+@inject IPurchasing Purchasing
+@inject IAdminCatalog Catalog
+@* Физический собственный остаток отделён от ожидаемой закупки и от остатков поставщика. *@
+<PageTitle>Мой склад</PageTitle><div class="page-heading"><h1>Мой склад</h1><a class="button" href="/admin/stock/products/new">Создать карточку</a></div><p>Карточки, публикация, наличие и ожидаемые поступления — в одном списке.</p><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<div class="admin-filters"><label>Название или код<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label><label>Показать<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Все товары</option><option value="Draft">Черновики</option><option value="Published">Опубликованные</option><option value="Archived">Архив</option><option value="unallocated">Принятые без карточки</option></select></label><label>Порядок<select @bind="Sort" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="name">По названию</option><option value="new">Сначала новые</option></select></label></div>
+@if (Filter != "unallocated" && Owned is not null) { <div class="table-wrap"><table><thead><tr><th>Товар</th><th>Публикация</th><th>Единица</th><th>Доступно на складе</th><th>Ожидается</th><th></th></tr></thead><tbody>@foreach (var r in Owned.Items) { <tr><td>@r.Name<small>@r.Sku</small></td><td>@Status(r.Status)</td><td>@r.Unit</td><td>@r.Available.ToString("0.####")</td><td>@r.Incoming.ToString("0.####")</td><td><div class="stock-row-actions"><a class="button secondary" href="@($"/admin/stock/products/{r.ProductId}")">Карточка и цена</a><AuthorizeView Policy="@AdminPolicies.Administrator"><button type="button" class="danger" disabled="@Busy" @onclick="() => DeleteProduct(r)">Удалить товар</button></AuthorizeView></div></td></tr> }</tbody></table></div> }
+else if (Unallocated is not null) { <p>Полученный товар, который ещё не связан с карточкой. При создании карточки количество переносится в её остаток один раз.</p><div class="table-wrap"><table><thead><tr><th>Позиция</th><th>Склад</th><th>Количество</th><th></th></tr></thead><tbody>@foreach (var r in Unallocated.Items) { <tr><td>@r.Code<small>@r.Name</small></td><td>@r.Warehouse</td><td>@r.Quantity.ToString("0.####") @r.Unit</td><td><a href="@($"/admin/purchases/card/{r.OfferId}")">Создать / связать карточку</a></td></tr> }</tbody></table></div> }
+@if (!Busy && Total == 0) { <p class="admin-empty">Товаров по выбранному фильтру нет. <a href="/admin/purchases">Выбрать товары для закупки →</a></p> }
+<div class="pager"><button disabled="@(Page <= 1)" @onclick="() => GoPage(Page - 1)">Назад</button><span>Всего @Total</span><button disabled="@(Page * 25 >= Total)" @onclick="() => GoPage(Page + 1)">Далее</button></div>
+@code {
+    /// <summary>Подтверждает удаление всей карточки с её вариантами; сервер повторно проверяет зависимости и версию.</summary>
+    /// <param name="row">Снимок карточки из списка склада.</param>
+    private async Task DeleteProduct(OwnedPosition row)
+    {
+        if (Busy || !await JS.InvokeAsync<bool>("confirm", $"Удалить товар «{row.Name}» со всеми его вариантами? Действие необратимо. При наличии остатков, закупочных связей или истории удаление будет запрещено.")) return;
+        await RunAsync(async () =>
+        {
+            await Catalog.DeleteProductAsync(row.ProductId, row.ProductVersion, OperationId, Cancellation.Token);
+            Owned = await Purchasing.OwnedAsync(Query, Cancellation.Token);
+            if (Owned.Items.Count == 0 && Page > 1) GoPage(Page - 1);
+        }, true);
+    }
+    /// <summary>Отображает публикацию независимо от физического наличия.</summary>
+    private static string Status(ProductStatus status) => status switch { ProductStatus.Draft => "Черновик", ProductStatus.Published => "Опубликован", _ => "Архив" };
+    /// <summary>Принятые позиции без переноса в вариант.</summary>
+    private AdminPage<UnallocatedPosition>? Unallocated;
+    /// <summary>Карточки с физическим и ожидаемым количеством.</summary>
+    private AdminPage<OwnedPosition>? Owned;
+    /// <summary>Размер выбранного списка.</summary>
+    private int Total => Filter != "unallocated" ? Owned?.Total ?? 0 : Unallocated?.Total ?? 0;
+    /// <summary>Загружает только выбранную страницу склада.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(async () => { if (Filter != "unallocated") Owned = await Purchasing.OwnedAsync(Query, Cancellation.Token); else Unallocated = await Purchasing.UnallocatedAsync(Query, Cancellation.Token); });
+}

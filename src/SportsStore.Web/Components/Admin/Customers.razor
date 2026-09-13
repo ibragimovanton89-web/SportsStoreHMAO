@@ -1,0 +1,37 @@
+@page "/admin/customers"
+@inherits AdminPageBase
+@inject IAdminPeople People
+@* Покупатель, правовой тип и подтверждение опта не являются ролями сотрудника. *@
+<PageTitle>Покупатели</PageTitle><h1>Покупатели и оптовый статус</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<div class="admin-filters"><label>Имя покупателя<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label><label>Оптовый статус<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Все</option><option value="Pending">Ожидает решения</option><option value="Approved">Подтверждён</option><option value="Rejected">Отклонён или отозван</option><option value="NotRequested">Не запрошен</option></select></label></div>
+@if (Data is not null) { @if (Data.Total == 0) { <section class="admin-empty"><h2>Покупателей пока нет</h2><p>Публичная регистрация и заявка на опт будут добавлены отдельным этапом. Фиктивные реальные покупатели не создаются.</p></section> }
+<div class="table-wrap"><table><thead><tr><th>Покупатель</th><th>Правовой тип</th><th>Условия</th><th>Опт</th><th>Реквизиты</th><th>Действие</th></tr></thead><tbody>@foreach (var c in Data.Items) { <tr><td>@c.Name</td><td>@KindName(c.Kind)</td><td>@(c.Segment == CustomerSegment.Retail ? "Розница" : "Опт")</td><td>@WholesaleName(c.Wholesale)</td><td>@c.LegalName<small>ИНН: @(c.Inn ?? "—") · КПП: @(c.Kpp ?? "—")</small></td><td><AuthorizeView Policy="@AdminPolicies.Administrator"><button @onclick="() => Edit(c)">Изменить / принять решение</button></AuthorizeView></td></tr> }</tbody></table></div><div class="pager"><button disabled="@(Data.Page <= 1)" @onclick="() => GoPage(Data.Page - 1)">Назад</button><span>Найдено @Data.Total</span><button disabled="@(Data.Page * 25 >= Data.Total)" @onclick="() => GoPage(Data.Page + 1)">Далее</button></div> }
+@if (Selected is not null) { <AuthorizeView Policy="@AdminPolicies.Administrator"><section class="admin-panel"><h2>Сведения и решение об опте</h2><form @onsubmit="Save" @onsubmit:preventDefault @onchange="() => Dirty = true"><div class="form-grid"><label>Имя<input @bind="Name" required maxlength="500" /></label><label>Правовой тип<select @bind="Kind"><option value="Individual">Физическое лицо</option><option value="SoleProprietor">ИП</option><option value="Organization">Организация</option></select></label><label>Коммерческие условия<select @bind="Segment"><option value="Retail">Розница</option><option value="Wholesale">Опт</option></select></label><label>Решение по опту<select @bind="Wholesale"><option value="NotRequested">Не запрошен</option><option value="Pending">Ожидает проверки</option><option value="Approved">Подтвердить</option><option value="Rejected">Отклонить / отозвать</option></select></label>@if (Kind != CustomerKind.Individual) { <label>Официальное название<input @bind="LegalName" required maxlength="500" /></label><label>ИНН<input @bind="Inn" required maxlength="12" /></label><label>КПП (при наличии)<input @bind="Kpp" maxlength="9" /></label> }<label class="wide">Причина решения без адресов и персональных реквизитов<textarea @bind="Reason" maxlength="500"></textarea></label></div><button disabled="@Busy">Сохранить решение</button></form><p class="hint">Подтверждение опта не назначает роли Admin или Manager. Отзыв влияет на следующий серверный запрос цены.</p></section></AuthorizeView> }
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Страница покупателей.</summary>
+    private AdminPage<CustomerData>? Data;
+    /// <summary>Снимок выбранного покупателя с версией.</summary>
+    private CustomerData? Selected;
+    /// <summary>Редактируемые сведения; не попадают в технический журнал.</summary>
+    private string Name = "", LegalName = "", Inn = "", Kpp = "", Reason = "";
+    /// <summary>Правовой тип, независимый от коммерческого сегмента.</summary>
+    private CustomerKind Kind;
+    /// <summary>Выбранные коммерческие условия.</summary>
+    private CustomerSegment Segment;
+    /// <summary>Решение по опту.</summary>
+    private WholesaleStatus Wholesale;
+    /// <summary>Читает страницу по URL.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Выполняет ограниченный запрос.</summary>
+    private async Task Load() => Data = await People.CustomersAsync(Query, Cancellation.Token);
+    /// <summary>Переносит исходный снимок в форму.</summary>
+    private void Edit(CustomerData c) { Selected = c; Name = c.Name; Kind = c.Kind; Segment = c.Segment; Wholesale = c.Wholesale; LegalName = c.LegalName ?? ""; Inn = c.Inn ?? ""; Kpp = c.Kpp ?? ""; Reason = ""; Dirty = false; OperationId = Guid.NewGuid(); }
+    /// <summary>Сохраняет сведения и решение с причиной и версией.</summary>
+    private Task Save() => RunAsync(async () => { await People.SaveCustomerAsync(new(Selected!.Id, Selected.Version, Name, Kind, Segment, Wholesale, LegalName, Inn, string.IsNullOrWhiteSpace(Kpp) ? null : Kpp), Reason, OperationId, Cancellation.Token); Selected = null; await Load(); }, true);
+    /// <summary>Отображает правовой тип на русском.</summary>
+    private static string KindName(CustomerKind k) => k switch { CustomerKind.Individual => "Физическое лицо", CustomerKind.SoleProprietor => "ИП", _ => "Организация" };
+    /// <summary>Отображает решение по опту на русском.</summary>
+    private static string WholesaleName(WholesaleStatus s) => s switch { WholesaleStatus.Approved => "Подтверждён", WholesaleStatus.Pending => "Ожидает проверки", WholesaleStatus.Rejected => "Отклонён / отозван", _ => "Не запрошен" };
+}
+

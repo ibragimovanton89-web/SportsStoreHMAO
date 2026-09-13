@@ -1,0 +1,7 @@
+@page "/admin/rules"
+@inject NavigationManager Navigation
+@* Старые закладки ведут на склад: цены редактируются внутри карточки товара. *@
+@code {
+    /// <summary>Перенаправляет прежний раздел цен в единый раздел собственных товаров.</summary>
+    protected override void OnInitialized() => Navigation.NavigateTo("/admin/stock", replace: true);
+}

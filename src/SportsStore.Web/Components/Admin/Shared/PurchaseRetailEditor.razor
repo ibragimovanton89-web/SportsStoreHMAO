@@ -1,0 +1,38 @@
+@inherits AdminPageBase
+@inject IPurchasing Purchasing
+@* Явная цена продажи или наценка от снимка конкретной закупки, защищённая от обновления прайса. *@
+<section class="admin-panel"><h3>@(Segment == CustomerSegment.Retail ? "Розничная цена" : "Оптовая цена") · @Sku @(MinimumQuantity > 1 ? $"· от {MinimumQuantity} ед." : "")</h3><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Data is not null) { <p>Действующая цена: <strong>@Money(Data.Amount)</strong></p><form @onsubmit="Save" @onsubmit:preventDefault @onchange="() => Dirty = true" @oninput="() => Dirty = true"><div class="form-grid"><label>Способ расчёта<select @bind="Mode"><option value="fixed">Указать цену вручную</option><option value="markup">Процент от моей закупки</option></select></label>
+@if (Mode == "fixed") { <label>Цена за единицу продажи, ₽<input type="number" min="0.01" step="0.01" @bind="Amount" @bind:event="oninput" required /></label> } else { <label>Закупка и выбранный в ней опт<select @bind="CostId"><option value="">Выберите закупку</option>@foreach (var c in Data.Costs) { <option value="@c.LineId">@c.Order · @c.Tier · @Money(c.UnitCost)</option> }</select></label><label>Наценка, %<input type="number" min="0" step="0.0001" @bind="Markup" @bind:event="oninput" required /></label> }</div><p>Новая цена: @Money(Preview)</p><button disabled="@(Busy || Preview is null)">Сохранить цену продажи</button></form><p class="hint">Наценка считается от закупочной цены выбранного заказа, округление до копеек. Обновление прайса эту цену не меняет. Публикация карточки выполняется ниже отдельной кнопкой.</p> }</section>
+@if (Segment == CustomerSegment.Wholesale) { <p class="hint">Оптовая цена доступна только покупателю с подтверждённым оптовым статусом. Это ваша цена продажи, а не тариф поставщика.</p> }
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Количество единиц SKU, начиная с которого применяется редактируемая цена.</summary>
+    [Parameter] public decimal MinimumQuantity { get; set; } = 1;
+    /// <summary>Формат продажи: цена опта хранится независимо от розничной.</summary>
+    [Parameter] public CustomerSegment Segment { get; set; } = CustomerSegment.Retail;
+    /// <summary>Вариант, для которого сохраняется цена.</summary>
+    [Parameter] public Guid VariantId { get; set; }
+    /// <summary>Подпись внутреннего SKU.</summary>
+    [Parameter] public string Sku { get; set; } = "";
+    /// <summary>Уведомляет родительскую карточку для проверки готовности публикации.</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+    /// <summary>Версия текущей цены и доступные закупочные снимки.</summary>
+    private PurchaseRetail? Data;
+    /// <summary>Явный режим ввода; по умолчанию цена не выдумывается.</summary>
+    private string Mode = "fixed";
+    /// <summary>Выбранный источник для наценки.</summary>
+    private Guid? CostId;
+    /// <summary>Сумма и процент, вводимые владельцем.</summary>
+    private decimal? Amount, Markup;
+    /// <summary>Предварительная цена; сервер повторяет расчёт независимо от интерфейса.</summary>
+    private decimal? Preview => Mode == "fixed" ? Amount : Data?.Costs.FirstOrDefault(x => x.LineId == CostId) is { } cost && Markup is >= 0 and <= 1000000 ? decimal.Round(cost.UnitCost * (1 + Markup.Value / 100), 2, MidpointRounding.AwayFromZero) : null;
+    /// <summary>Загружает цену при первом выборе варианта без стирания локальной формы при перерисовке родителя.</summary>
+    protected override Task OnParametersSetAsync() => Data?.VariantId == VariantId ? Task.CompletedTask : RunAsync(Load);
+    /// <summary>Перечитывает версию опубликованной цены.</summary>
+    private async Task Load() { Data = await Purchasing.SalePriceAsync(VariantId, Segment, Cancellation.Token, MinimumQuantity); Amount = Data.Amount; }
+    /// <summary>Сохраняет ручное решение владельца и обновляет готовность карточки.</summary>
+    private Task Save() => RunAsync(async () => { await Purchasing.SetSalePriceAsync(VariantId, Segment, Data!.Version, Mode == "markup" ? CostId : null, Mode == "fixed" ? Amount : null, Mode == "markup" ? Markup : null, OperationId, Cancellation.Token, MinimumQuantity); await Load(); await Saved.InvokeAsync(); }, true);
+}
+
+

@@ -1,0 +1,25 @@
+@page "/account/{ActionName=login}"
+@model SportsStore.Web.Pages.Account.IndexModel
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@* Отдельные HTTP-формы Identity: cookie и antiforgery работают до начала интерактивного ответа. *@
+<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Вход сотрудника — SportsStoreHMAO</title><link rel="stylesheet" href="/app.css" /><link rel="stylesheet" href="/admin.css" /></head>
+<body class="account-body"><main class="account-card"><a href="/" class="account-brand">SPORTSSTORE HMAO</a>
+@if (Model.Error is not null) { <p role="alert" class="admin-error">@Model.Error</p> }
+@if (Model.Message is not null) { <p role="status" class="admin-success">@Model.Message</p> }
+@if (Model.ActionName == "login") {
+<h1>Вход сотрудника</h1><p>Управление магазином · ХМАО — Югра</p>
+<form method="post" asp-page-handler="Login"><input type="hidden" asp-for="ReturnUrl" /><label>Email<input asp-for="Email" type="email" autocomplete="username" required maxlength="256" /></label><label>Пароль<input asp-for="Password" type="password" autocomplete="current-password" required maxlength="1024" /></label><button type="submit">Войти</button></form>
+} else if (Model.ActionName == "mfa") {
+<h1>Двухфакторная проверка</h1><form method="post" asp-page-handler="Mfa"><input type="hidden" asp-for="ReturnUrl" /><label>Код приложения или резервный код<input asp-for="Code" autocomplete="one-time-code" required maxlength="100" /></label><label class="check"><input asp-for="Recovery" />Использовать резервный код</label><button>Подтвердить вход</button></form>
+} else if (Model.ActionName == "setup") {
+<h1>Защитите аккаунт</h1>
+@if (Model.RecoveryCodes.Length > 0) { <ul class="recovery-codes">@foreach (var code in Model.RecoveryCodes) { <li><code>@code</code></li> }</ul><a class="button" href="/admin">Перейти в управление</a> }
+else if (Model.SharedKey is not null) { <p>В приложении-аутентификаторе добавьте аккаунт с ключом настройки. Выберите код по времени (TOTP).</p><p class="setup-key"><code>@Model.SharedKey</code></p><form method="post" asp-page-handler="Setup"><label>Шестизначный код<input asp-for="Code" inputmode="numeric" autocomplete="one-time-code" required maxlength="20" /></label><button>Включить защиту</button></form> }
+else { <p>До настройки двухфакторной защиты управление магазином недоступно.</p><form method="post" asp-page-handler="StartSetup"><button>Начать настройку TOTP</button></form> }
+} else if (Model.ActionName == "password") {
+<h1>Смена пароля</h1><form method="post" asp-page-handler="Password"><label>Текущий пароль<input asp-for="Password" type="password" autocomplete="current-password" required /></label><label>Новый пароль<input asp-for="NewPassword" type="password" autocomplete="new-password" minlength="12" required /></label><p>От 12 символов: строчные и прописные буквы, цифра и специальный знак.</p><button>Изменить пароль</button></form><a href="/admin">Вернуться</a>
+} else if (Model.ActionName == "invite") {
+<h1>Приглашение сотрудника</h1><form method="post" asp-page-handler="Invite"><input type="hidden" asp-for="UserId" /><input type="hidden" asp-for="Token" /><label>Создайте пароль<input asp-for="NewPassword" type="password" autocomplete="new-password" minlength="12" required /></label><p>От 12 символов: разные регистры, цифра и специальный знак. После входа потребуется TOTP.</p><button>Принять приглашение</button></form>
+} else { <h1>Доступ ограничен</h1><p>Требуется актуальная учётная запись сотрудника с подходящей ролью и двухфакторной защитой.</p><a href="/account/setup">Настроить защиту</a><a href="/account/login">Войти заново</a> }
+@if (User.Identity?.IsAuthenticated == true) { <form method="post" asp-page-handler="Logout"><button class="secondary">Выйти</button></form> }
+</main></body></html>

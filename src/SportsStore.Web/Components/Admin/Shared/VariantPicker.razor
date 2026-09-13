@@ -1,0 +1,29 @@
+@* Явный выбор варианта через ограниченный поиск собственной карточки вместо ввода технических GUID. *@
+@inject IAdminCatalog Catalog
+<div><label>@Label<LiveSearch @bind-Value="Search" OnSearch="Find" Placeholder="Название или SKU" /></label><label>Карточка<select @onchange="SelectProduct"><option value="">Выберите товар</option>@foreach (var p in Products) { <option value="@p.Id">@p.Name</option> }</select></label><label>Вариант<select value="@Value" @onchange="SelectVariant"><option value="">Выберите вариант</option>@if (Value is not null && !Variants.Any(x => x.Id == Value)) { <option value="@Value">@SelectedLabel</option> }@foreach (var v in Variants) { <option value="@v.Id">@v.Sku · @v.Size @v.Color · @v.Unit</option> }</select></label>@if (Error is not null) { <p role="alert">@Error</p> }</div>
+@code {
+    /// <summary>Подпись поиска варианта.</summary>
+    [Parameter] public string Label { get; set; } = "Поиск варианта";
+    /// <summary>Выбранный вариант.</summary>
+    [Parameter] public Guid? Value { get; set; }
+    /// <summary>Передаёт выбор родительской форме.</summary>
+    [Parameter] public EventCallback<Guid?> ValueChanged { get; set; }
+    /// <summary>Строка серверного поиска.</summary>
+    private string Search = "";
+    /// <summary>Понятное обозначение сохранённого варианта.</summary>
+    private string SelectedLabel = "Сохранённый вариант";
+    /// <summary>Ограниченные карточки поиска.</summary>
+    private IReadOnlyList<ProductData> Products = [];
+    /// <summary>Варианты одной выбранной карточки.</summary>
+    private IReadOnlyList<VariantData> Variants = [];
+    /// <summary>Безопасная ошибка.</summary>
+    private string? Error;
+    /// <summary>Показывает SKU уже выбранного варианта.</summary>
+    protected override async Task OnParametersSetAsync() { if (Value is Guid id) { try { SelectedLabel = (await Catalog.VariantAsync(id)).Sku; } catch { Error = "Вариант недоступен."; } } }
+    /// <summary>Ищет максимум 25 карточек.</summary>
+    private async Task Find() { try { Products = (await Catalog.ProductsAsync(new(Search))).Items; Error = null; } catch { Error = "Не удалось найти товары."; } }
+    /// <summary>Читает варианты явно выбранной карточки.</summary>
+    private async Task SelectProduct(ChangeEventArgs e) { try { Variants = Guid.TryParse(e.Value?.ToString(), out var id) ? await Catalog.VariantsAsync(id) : []; Error = null; } catch { Error = "Не удалось загрузить варианты."; } }
+    /// <summary>Передаёт идентификатор, существование которого сервер проверит при сохранении.</summary>
+    private Task SelectVariant(ChangeEventArgs e) => ValueChanged.InvokeAsync(Guid.TryParse(e.Value?.ToString(), out var id) ? id : null);
+}

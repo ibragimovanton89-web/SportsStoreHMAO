@@ -1,0 +1,38 @@
+@page "/admin/employees"
+@attribute [Authorize(Policy = AdminPolicies.Administrator)]
+@inherits AdminPageBase
+@inject IAdminEmployees EmployeesService
+@* Управление сотрудниками доступно только Admin; одноразовая ссылка выводится лишь в текущем защищённом компоненте. *@
+<PageTitle>Сотрудники</PageTitle><h1>Сотрудники</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<div class="admin-filters"><label>Email сотрудника<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label></div>
+@if (Data is not null) { <div class="table-wrap"><table><thead><tr><th>Сотрудник</th><th>Роль</th><th>Защита</th><th>Доступ</th><th>Действие</th></tr></thead><tbody>@foreach (var row in Data.Items) { <tr><td>@row.Email</td><td>@RoleName(row.Role)</td><td>@(row.Mfa ? "TOTP настроен" : "Требуется TOTP")<small>@(row.Confirmed ? "Аккаунт подтверждён" : "Приглашение не принято")</small></td><td>@(row.Blocked ? "Заблокирован" : "Активен")</td><td><button @onclick="() => Edit(row)">Права и блокировка</button></td></tr> }</tbody></table></div><div class="pager"><button disabled="@(Data.Page <= 1)" @onclick="() => GoPage(Data.Page - 1)">Назад</button><span>Найдено @Data.Total</span><button disabled="@(Data.Page * 25 >= Data.Total)" @onclick="() => GoPage(Data.Page + 1)">Далее</button></div> }
+<section class="admin-panel"><h2>Пригласить нового сотрудника</h2><form @onsubmit="Invite" @onsubmit:preventDefault @onchange="() => Dirty = true"><label>Email<input type="email" @bind="Email" required maxlength="256" /></label><label>Роль<select @bind="NewRole"><option value="Manager">Менеджер</option><option value="Admin">Администратор</option></select></label><button disabled="@Busy">Создать одноразовое приглашение</button></form>
+@if (Invitation is not null) { <p class="admin-success">Приглашение создано. Передайте ссылку сотруднику по защищённому каналу. Почта не отправлялась.</p><label>Одноразовая ссылка<input readonly value="@Invitation" aria-label="Одноразовая ссылка приглашения" /></label><button class="secondary" @onclick="() => Invitation = null">Скрыть ссылку</button> }
+</section>
+@if (Selected is not null) { <section class="admin-panel"><h2>Изменить права: @Selected.Email</h2><form @onsubmit="Save" @onsubmit:preventDefault @onchange="() => Dirty = true"><label>Роль<select @bind="Role"><option value="Manager">Менеджер</option><option value="Admin">Администратор</option></select></label><label class="check"><input type="checkbox" @bind="Blocked" />Заблокировать вход</label><label>Причина без персональных данных<textarea @bind="Reason" maxlength="500" required></textarea></label><button disabled="@Busy">Сохранить и отозвать старые сессии</button></form><p class="hint">Снятие роли и блокировка действуют при следующей серверной операции; открытая вкладка также перепроверяется. Последнего активного администратора заблокировать или понизить нельзя.</p></section> }
+<NavigationLock ConfirmExternalNavigation="Dirty" OnBeforeInternalNavigation="BeforeNavigation" />
+@code {
+    /// <summary>Ограниченная страница сотрудников.</summary>
+    private AdminPage<EmployeeData>? Data;
+    /// <summary>Снимок для проверки конкурентного изменения.</summary>
+    private EmployeeData? Selected;
+    /// <summary>Поля приглашения и изменения роли.</summary>
+    private string Email = "", NewRole = "Manager", Role = "Manager", Reason = "";
+    /// <summary>Запрошенная блокировка сотрудника.</summary>
+    private bool Blocked;
+    /// <summary>Ссылка хранится только в памяти текущего компонента, не в логах или БД.</summary>
+    private string? Invitation;
+    /// <summary>Читает сотрудников по URL.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Выполняет авторизованный запрос.</summary>
+    private async Task Load() => Data = await EmployeesService.ListAsync(Query, Cancellation.Token);
+    /// <summary>Создаёт приглашение без пароля и показывает ссылку для ручной передачи.</summary>
+    private Task Invite() => RunAsync(async () => { var relative = await EmployeesService.InviteAsync(Email, NewRole, OperationId, Cancellation.Token); Invitation = new Uri(new Uri(Navigation.BaseUri), relative).AbsoluteUri; await Load(); }, true);
+    /// <summary>Заполняет форму снимком, не разрешая изменять email через команду прав.</summary>
+    private void Edit(EmployeeData row) { Selected = row; Role = row.Role; Blocked = row.Blocked; Reason = ""; OperationId = Guid.NewGuid(); }
+    /// <summary>Сохраняет роль и блокировку с версией формы и явным подтверждением.</summary>
+    private Task Save() => RunAsync(async () => { if (!await JS.InvokeAsync<bool>("confirm", "Изменить права и отозвать ранее открытые сессии сотрудника?")) return; await EmployeesService.UpdateAsync(Selected! with { Role = Role, Blocked = Blocked }, Reason, OperationId, Cancellation.Token); Selected = null; await Load(); }, true);
+    /// <summary>Русское обозначение роли доступа.</summary>
+    private static string RoleName(string role) => role == "Admin" ? "Администратор" : "Менеджер";
+}
+

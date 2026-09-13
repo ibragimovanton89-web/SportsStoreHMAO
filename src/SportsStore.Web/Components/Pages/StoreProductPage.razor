@@ -1,0 +1,14 @@
+@page "/catalog/{Id:guid}"
+@using SportsStore.Application.Storefront
+@inject IStorefront Storefront
+@* Публичная карточка не содержит внутренних закупочных сумм и не принимает оплату. *@
+<PageTitle>@(Data?.Name ?? "Товар не найден") · SportsStoreHMAO</PageTitle><section class="container store-catalog"><a href="/catalog">← Все товары</a>
+@if (Data is null) { <h1>Товар не найден</h1><p>Карточка недоступна или ещё не опубликована.</p> } else { <p class="eyebrow">@Data.Brand / @Data.Category</p><h1>@Data.Name</h1><div class="store-detail"><div class="store-gallery">@foreach (var image in Data.Images) { <img src="@image" alt="@Data.Name" /> }</div><div><p class="store-description">@Data.Description</p>@foreach (var v in Data.Variants) { <article class="store-variant"><h2>@v.Size @v.Color</h2><small>SKU @v.Sku · за @v.Unit</small><p class="store-price">@v.Price.ToString("N2") ₽</p><p>@(v.Available > 0 ? $"На складе: {v.Available:0.####} {v.Unit}" : v.Incoming > 0 ? "В пути на наш склад" : "Нет в наличии")</p></article> }<p>Магазин работает на территории ХМАО — Югры. Онлайн-оформление заказа будет доступно позднее.</p></div></div> }</section>
+@code {
+    /// <summary>Идентификатор публичной карточки.</summary>
+    [Parameter] public Guid Id { get; set; }
+    /// <summary>Опубликованная карточка либо null для скрытых состояний.</summary>
+    private StoreProduct? Data;
+    /// <summary>Получает только разрешённое публичное представление.</summary>
+    protected override async Task OnParametersSetAsync() => Data = await Storefront.ProductAsync(Id);
+}

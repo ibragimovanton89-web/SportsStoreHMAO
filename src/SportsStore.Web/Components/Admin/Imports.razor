@@ -1,0 +1,23 @@
+@page "/admin/imports"
+@inherits AdminPageBase
+@inject IAdminImport Import
+@* Файл передаётся потоком; путь сервера и исполнение консольной утилиты в Web отсутствуют. *@
+<PageTitle>Импорт прайса</PageTitle><h1>Импорт закупочного прайса</h1><p class="admin-lead">Загрузить → проверить изменения → применить. Публикация каталога не выполняется.</p><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+<section class="admin-panel"><h2>Проверить новый файл BallMarket</h2><p>Бинарный XLS до 10 МиБ. Временный файл удаляется после проверки; отчёт остаётся в базе.</p><label>Выбрать прайс<InputFile OnChange="Upload" accept=".xls" disabled="@Busy" /></label></section>
+<div class="admin-filters"><label>Имя файла<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label><label>Статус<select @bind="Filter" @bind:after="SearchWhenReady" disabled="@(Busy || Dirty)"><option value="">Все</option><option value="Preview">Проверенные</option><option value="Invalid">С ошибками</option><option value="Applied">Применённые</option></select></label></div>
+@if (Data is not null) {
+<div class="table-wrap"><table><thead><tr><th>Файл</th><th>Дата прайса</th><th>Статус</th><th>Новые / изменённые / без изменений</th><th>Ошибки</th></tr></thead><tbody>@foreach (var row in Data.Items) { <tr><td><a href="@($"/admin/imports/{row.Id}")">@row.Name</a></td><td>@row.Date.ToString("dd.MM.yyyy")</td><td>@Status(row.Status)</td><td>@row.New / @row.Changed / @row.Unchanged</td><td>@row.Errors</td></tr> }</tbody></table></div>
+@if (Data.Total == 0) { <p>Партий пока нет. Загрузите файл для предварительной проверки.</p> }
+<div class="pager"><button disabled="@(Data.Page <= 1 || Busy)" @onclick="() => GoPage(Data.Page - 1)">Назад</button><span>Найдено @Data.Total</span><button disabled="@(Data.Page * 25 >= Data.Total || Busy)" @onclick="() => GoPage(Data.Page + 1)">Далее</button></div>
+}
+@code {
+    /// <summary>Одна страница партий.</summary>
+    private AdminPage<BatchData>? Data;
+    /// <summary>Читает список при изменении фильтров.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(async () => Data = await Import.BatchesAsync(Query, Cancellation.Token));
+    /// <summary>Передаёт ограниченный поток и открывает сохранённый отчёт.</summary>
+    private Task Upload(InputFileChangeEventArgs e) => RunAsync(async () => { await using var stream = e.File.OpenReadStream(10 * 1024 * 1024, Cancellation.Token); var report = await Import.UploadAsync(stream, e.File.Name, OperationId, Cancellation.Token); OperationId = Guid.NewGuid(); Navigation.NavigateTo($"/admin/imports/{report.Id}"); });
+    /// <summary>Русское название состояния партии.</summary>
+    private static string Status(ImportStatus s) => s switch { ImportStatus.Preview => "Проверена, не применена", ImportStatus.Invalid => "Есть ошибки", _ => "Применена" };
+}
+

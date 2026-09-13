@@ -1,0 +1,27 @@
+# Отдельное имя проекта изолирует контейнеры и том от других приложений.
+name: sportsstorehmao-local
+services:
+  postgres:
+    image: postgres:17.11-bookworm
+    # Административный пароль нужен для начальной настройки; приложение использует отдельную ограниченную роль.
+    environment:
+      POSTGRES_DB: sportsstorehmao
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD}
+    # PostgreSQL доступен только с локального компьютера, не из внешней сети.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    # Путь данных соответствует PostgreSQL 17; init-скрипт выполняется только при пустом томе.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-app.sh:/docker-entrypoint-initdb.d/10-app.sh:ro
+    # Ожидание готовности сервера для docker compose up --wait.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sportsstorehmao"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+volumes:
+  postgres-data:

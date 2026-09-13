@@ -1,0 +1,14 @@
+@page "/admin/audit"
+@attribute [Authorize(Policy = AdminPolicies.Administrator)]
+@inherits AdminPageBase
+@inject IAdminPeople People
+@* Безопасный аудит не раскрывает реквизиты, пароли и токены; технический идентификатор спрятан в дополнительных сведениях. *@
+<PageTitle>Журнал действий</PageTitle><h1>Журнал административных действий</h1><Feedback Busy="Busy" Error="@Error" /><div class="admin-filters"><label>Действие или описание<LiveSearch @bind-Value="Search" OnSearch="SearchWhenReady" Disabled="Dirty" /></label></div>
+@if (Data is not null) { <div class="table-wrap"><table><thead><tr><th>Время UTC</th><th>Изменение</th><th>Причина</th><th>Дополнительные сведения</th></tr></thead><tbody>@foreach (var row in Data.Items) { <tr><td>@row.At.ToString("dd.MM.yyyy HH:mm:ss")</td><td>@row.Description</td><td>@(row.Reason ?? "—")</td><td><details><summary>Диагностика операции</summary><p>Сотрудник: @row.Actor</p><p>Действие: @row.Action</p><p>Операция: @row.Operation</p></details></td></tr> }</tbody></table></div>@if (Data.Total == 0) { <p>Изменений пока не зарегистрировано.</p> }<div class="pager"><button disabled="@(Data.Page <= 1)" @onclick="() => GoPage(Data.Page - 1)">Назад</button><span>Найдено @Data.Total</span><button disabled="@(Data.Page * 25 >= Data.Total)" @onclick="() => GoPage(Data.Page + 1)">Далее</button></div> }
+@code {
+    /// <summary>Текущая страница безопасного журнала.</summary>
+    private AdminPage<AuditData>? Data;
+    /// <summary>Загружает страницу только через проверку Admin.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(async () => Data = await People.AuditAsync(Query, Cancellation.Token));
+}
+
