@@ -4,12 +4,13 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="SportsStoreHMAO — оригинальные спортивные товары для розницы и оптовых закупок в ХМАО — Югре. Готовимся к открытию." />
+    @if (!HttpContext.Request.Path.StartsWithSegments("/catalog")) { <meta name="description" content="SportsStoreHMAO — оригинальные спортивные товары для розницы и оптовых закупок в ХМАО — Югре. Готовимся к открытию." /> }
     <base href="/" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["admin.css"]" />
+    <link rel="stylesheet" href="@Assets["storefront.css"]" />
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <HeadOutlet />
+    <HeadOutlet @rendermode="AdminRenderMode" />
 </head>
 <body>
     <Routes @rendermode="AdminRenderMode" />
@@ -18,10 +19,9 @@
 </html>
 
 @code {
-    /// <summary>HTTP-контекст первоначального документа; используется только для выбора интерактивности административного маршрута.</summary>
+    /// <summary>HTTP-контекст первоначального документа; используется только для выбора интерактивности административного маршрута и каталога.</summary>
     [CascadingParameter] public HttpContext HttpContext { get; set; } = default!;
-    /// <summary>Публичная главная остаётся SSR; административные маршруты получают серверную интерактивность.</summary>
+    /// <summary>Публичная главная остаётся SSR; административные маршруты получают интерактивность без prerender, каталог — интерактивность с полезным SSR.</summary>
     private Microsoft.AspNetCore.Components.IComponentRenderMode? AdminRenderMode => HttpContext.Request.Path.StartsWithSegments("/admin")
-        ? new Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode(prerender: false) : null;
+        ? new Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode(prerender: false) : HttpContext.Request.Path.StartsWithSegments("/catalog") ? new Microsoft.AspNetCore.Components.Web.InteractiveServerRenderMode(prerender: true) : null;
 }
-

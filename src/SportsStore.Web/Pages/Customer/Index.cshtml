@@ -1,0 +1,73 @@
+@page "/customer/{ActionName=login}"
+@model SportsStore.Web.Pages.Customer.IndexModel
+@using SportsStore.Domain.Entities
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@* Покупательские HTTP-формы. Все POST защищены antiforgery; пароли и токены не выводятся в сообщения. *@
+@{ Layout = null; }
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="robots" content="noindex, nofollow" />
+<title>@Model.Title · SportsStoreHMAO</title><link rel="stylesheet" href="/app.css" /><link rel="stylesheet" href="/customer.css" /></head>
+<body><a class="customer-skip" href="#main">К содержимому</a><header class="customer-header"><a class="brand" href="/">SPORTSSTORE <small>HMAO / ЮГРА</small></a><nav aria-label="Навигация магазина"><a href="/catalog">Каталог</a><a href="/customer/profile">Личный кабинет</a></nav></header>
+<main id="main" class="customer-shell"><div class="customer-intro"><p class="eyebrow">Спорт начинается с вас</p><h1>@Model.Title</h1><p>Ваши данные и условия — в одном месте.</p></div>
+@if (Model.IsPrivate) { <nav class="customer-tabs" aria-label="Разделы кабинета"><a href="/customer/profile">Профиль</a><a href="/customer/addresses">Адреса</a><a href="/customer/orders">Заказы</a><a href="/cart">Корзина</a><a href="/customer/wholesale">Оптовые условия</a><a href="/customer/security">Безопасность</a><form method="post" action="/customer/logout">@Html.AntiForgeryToken()<button type="submit">Выйти</button></form></nav> }
+<section class="customer-panel">
+@if (Model.Message is not null) { <div class="customer-message" role="status">@Model.Message</div> }
+@if (Model.Error is not null) { <div class="customer-error" role="alert">@Model.Error</div> }
+@if (Model.ActionName is "register" or "login" or "resend-confirmation" or "forgot-password" or "reset-password" or "confirm-email")
+{
+    <form method="post" class="customer-form">
+        <input type="hidden" asp-for="ReturnUrl" />
+        @if (Model.ActionName is "confirm-email" or "reset-password") { <input type="hidden" asp-for="UserId" /><input type="hidden" asp-for="Token" /> }
+        @if (Model.ActionName == "register") { <label asp-for="DisplayName">Как к вам обращаться</label><input asp-for="DisplayName" required maxlength="200" autocomplete="name" /> }
+        @if (Model.ActionName is "register" or "login" or "resend-confirmation" or "forgot-password") { <label asp-for="Email">Электронная почта</label><input asp-for="Email" type="email" required maxlength="254" autocomplete="email" /> }
+        @if (Model.ActionName == "login") { <label for="Password">Пароль</label><input name="Password" id="Password" type="password" required maxlength="1024" autocomplete="current-password" /> }
+        @if (Model.ActionName is "register" or "reset-password")
+        { <label for="NewPassword">Пароль</label><input name="NewPassword" id="NewPassword" type="password" required minlength="12" maxlength="1024" autocomplete="new-password" aria-describedby="password-help" /><p id="password-help" class="customer-hint">Минимум 12 символов: прописные и строчные буквы, цифры и специальный символ.</p><label for="ConfirmPassword">Повторите пароль</label><input name="ConfirmPassword" id="ConfirmPassword" type="password" required minlength="12" maxlength="1024" autocomplete="new-password" /> }
+        <button class="customer-primary" type="submit">@(Model.ActionName switch { "register" => "Создать аккаунт", "login" => "Войти", "confirm-email" => "Подтвердить почту", "reset-password" => "Сохранить пароль", _ => "Отправить письмо" })</button>
+    </form>
+    <nav class="customer-links" aria-label="Помощь со входом"><a href="/customer/login">Войти</a><a href="/customer/register">Создать аккаунт</a><a href="/customer/forgot-password">Забыли пароль?</a><a href="/customer/resend-confirmation">Подтвердить почту</a></nav>
+    <p class="customer-hint">Сотрудникам магазина: <a href="/account/login">отдельный вход с двухфакторной проверкой</a>.</p>
+}
+else if (Model.ActionName == "profile")
+{
+    <p>Подтверждённая почта: <strong>@Model.Profile?.Email</strong></p>
+    <form method="post" class="customer-form"><input type="hidden" asp-for="Version" /><input type="hidden" asp-for="OperationId" />
+    <label asp-for="DisplayName">Имя</label><input asp-for="DisplayName" required maxlength="200" autocomplete="name" />
+    <label asp-for="Phone">Контактный телефон</label><input asp-for="Phone" type="tel" maxlength="32" autocomplete="tel" /><p class="customer-hint">Телефон используется как контактный и пока не подтверждается.</p>
+    <label asp-for="Kind">Правовой тип</label><select asp-for="Kind"><option value="Individual">Физическое лицо</option><option value="SoleProprietor">ИП</option><option value="Organization">Организация</option></select>
+    <label asp-for="LegalName">Официальное название — для ИП и организации</label><input asp-for="LegalName" maxlength="500" autocomplete="organization" />
+    <label asp-for="Inn">ИНН — 12 цифр для ИП, 10 для организации</label><input asp-for="Inn" maxlength="12" inputmode="numeric" />
+    <label asp-for="Kpp">КПП организации, если применим</label><input asp-for="Kpp" maxlength="9" inputmode="numeric" />
+    @if (Model.Profile?.Status is WholesaleStatus.Approved or WholesaleStatus.Pending) { <label class="customer-check"><input asp-for="AcknowledgeRevocation" />При изменении правового типа или реквизитов согласен на отзыв опта или ожидающей заявки. После сохранения потребуется новая заявка.</label> }
+    <button class="customer-primary">Сохранить профиль</button></form>
+}
+else if (Model.ActionName == "addresses")
+{
+    @foreach (var a in Model.Addresses)
+    { <details class="customer-address" open="@(Model.Error is not null && Model.RecordId == a.Id)"><summary>@a.Recipient · @a.Address</summary><form method="post" class="customer-form">
+        <input type="hidden" name="RecordId" value="@a.Id" /><input type="hidden" name="Version" value="@(Model.Error is not null && Model.RecordId == a.Id ? Model.Version : a.Version)" />
+        <label>Получатель<input name="Recipient" value="@(Model.Error is not null && Model.RecordId == a.Id ? Model.Recipient : a.Recipient)" required maxlength="200" /></label>
+        <label>Адрес<textarea name="Address" required maxlength="500">@(Model.Error is not null && Model.RecordId == a.Id ? Model.Address : a.Address)</textarea></label>
+        <label>Индекс<input name="PostalCode" value="@(Model.Error is not null && Model.RecordId == a.Id ? Model.PostalCode : a.PostalCode)" maxlength="20" /></label>
+        <div class="customer-actions"><button class="customer-primary">Сохранить адрес</button><button name="command" value="delete" class="customer-danger">Удалить адрес</button></div></form></details> }
+    <h2>Новый адрес</h2><form method="post" class="customer-form"><input type="hidden" name="RecordId" value="@Guid.Empty" />
+    <label>Получатель<input name="Recipient" value="@(Model.RecordId == Guid.Empty ? Model.Recipient : "")" required maxlength="200" autocomplete="name" /></label>
+    <label>Адрес<textarea name="Address" required maxlength="500" autocomplete="street-address">@(Model.RecordId == Guid.Empty ? Model.Address : "")</textarea></label>
+    <label>Индекс<input name="PostalCode" value="@(Model.RecordId == Guid.Empty ? Model.PostalCode : "")" maxlength="20" autocomplete="postal-code" /></label><button class="customer-primary">Добавить адрес</button></form>
+}
+else if (Model.ActionName == "wholesale")
+{
+    <p class="customer-status">@(Model.Profile?.Status switch { WholesaleStatus.Approved => "Оптовые условия одобрены", WholesaleStatus.Pending => "Заявка ожидает проверки", WholesaleStatus.Rejected => "Действуют розничные условия", _ => "Вы можете подать заявку на оптовые условия" })</p>
+    @if (Model.Profile?.HasLegacyApproval == true) { <p class="customer-hint">Оптовые условия предоставлены ранее, без заявки в этом кабинете.</p> }
+    @if (Model.Profile?.Status is not (WholesaleStatus.Approved or WholesaleStatus.Pending)) { <form method="post" class="customer-form"><input type="hidden" asp-for="OperationId" /><label asp-for="Comment">Комментарий к заявке</label><textarea asp-for="Comment" maxlength="500"></textarea><p class="customer-hint">В заявку попадёт снимок текущих сведений из профиля. Физлицо также может подать заявку. До одобрения действуют розничные цены.</p><button class="customer-primary">Подать заявку на опт</button></form> }
+    @foreach (var a in Model.Applications) { <article class="customer-address"><h2>@SportsStore.Web.Pages.Customer.IndexModel.StatusName(a.Status)</h2><p>@a.SubmittedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</p><p>@(a.Kind == CustomerKind.Individual ? "Физическое лицо" : a.Kind == CustomerKind.SoleProprietor ? "ИП" : "Организация") · @a.LegalName</p>@if (a.Inn is not null) { <p>ИНН: @a.Inn @if (a.Kpp is not null) { <span> · КПП: @a.Kpp</span> }</p> }<p>@a.Comment</p><p>@a.PublicReason</p>
+        @if (a.Status == WholesaleApplicationStatus.Pending) { <form method="post"><input type="hidden" name="RecordId" value="@a.Id" /><input type="hidden" name="Version" value="@a.Version" /><input type="hidden" name="OperationId" value="@Model.OperationId" /><button name="command" value="withdraw">Отозвать заявку</button></form> }</article> }
+    @if (Model.History.Count > 0) { <h2>История решений</h2><ol class="customer-history">@foreach (var h in Model.History) { <li><strong>@SportsStore.Web.Pages.Customer.IndexModel.StatusName(h.Outcome)</strong> · @h.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm")<p>@h.Reason</p>@if (h.WithoutApplication) { <small>Решение администратора без заявки</small> }</li> }</ol> }
+}
+else if (Model.ActionName == "security")
+{
+    <form method="post" class="customer-form"><label for="Password">Текущий пароль</label><input name="Password" id="Password" type="password" required maxlength="1024" autocomplete="current-password" />
+    <label for="NewPassword">Новый пароль</label><input name="NewPassword" id="NewPassword" type="password" required minlength="12" maxlength="1024" autocomplete="new-password" /><p class="customer-hint">Минимум 12 символов: прописные и строчные буквы, цифры и специальный символ. Остальные сессии будут отозваны.</p>
+    <label for="ConfirmPassword">Повторите новый пароль</label><input name="ConfirmPassword" id="ConfirmPassword" type="password" required minlength="12" maxlength="1024" autocomplete="new-password" /><button class="customer-primary">Изменить пароль</button></form>
+}
+</section></main><footer class="customer-footer">SportsStoreHMAO · ХМАО — Югра · <a href="/catalog">Вернуться к товарам</a></footer></body></html>

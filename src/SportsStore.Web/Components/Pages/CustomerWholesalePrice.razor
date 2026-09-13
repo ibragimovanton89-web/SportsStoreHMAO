@@ -1,0 +1,66 @@
+@using SportsStore.Application.Customers
+@inject ICustomerAccount Account
+@implements IDisposable
+@* Персональная цена отдельна от публичного DTO: количество относится только к выбранному SKU. *@
+@if (Price is not null || WasEligible && (Loading || Error is not null))
+{
+    <section class="sf-wholesale" aria-label="Ваши оптовые условия">
+        <h2>Ваша оптовая цена</h2>
+        <label for="wholesale-quantity">Количество одного SKU<input id="wholesale-quantity" type="number" min="1" max="1000000" step="1" value="@QuantityText" @oninput="ChangeQuantity" aria-invalid="@(Quantity < 1)" /></label>
+        <div aria-live="polite">@if (Loading) { <p>Проверяем цену…</p> } else if (Price?.Amount is decimal amount) { <p class="sf-detail-price">@amount.ToString("N2") ₽ <small>/ @Unit</small></p> } else { <p>Для этого количества оптовая цена не задана.</p> }</div>
+        @if (Price?.Tiers.Count > 0) { <ul>@foreach (var tier in Price.Tiers) { <li>От @tier.MinimumQuantity.ToString("0.####") @Unit — @tier.Amount.ToString("N2") ₽ / @Unit</li> }</ul> }
+        <button type="button" disabled="@(Quantity < 1)" @onclick="LoadAsync">Обновить условия</button>
+    </section>
+}
+@if (Error is not null) { <p role="alert">@Error</p> }
+@code {
+    /// <summary>Публичная карточка, принадлежность которой проверяет сервис.</summary>
+    [Parameter] public Guid ProductId { get; set; }
+    /// <summary>Конкретный выбранный вариант.</summary>
+    [Parameter] public Guid VariantId { get; set; }
+    /// <summary>Единица продажи для понятного отображения цены.</summary>
+    [Parameter] public string Unit { get; set; } = "";
+    /// <summary>Целое количество одного SKU; не создаёт резерв или заказ.</summary>
+    private int Quantity = 1;
+    /// <summary>Исходный ввод сохраняется при ошибке; не подменяется предыдущим допустимым количеством.</summary>
+    private string QuantityText = "1";
+    /// <summary>Последний вариант для сброса количества при его смене.</summary>
+    private Guid PreviousVariant;
+    /// <summary>Результат последней актуальной проверки.</summary>
+    private CustomerPrice? Price;
+    /// <summary>Показывает загрузку без сохранения старой суммы.</summary>
+    private bool Loading;
+    /// <summary>Сохраняет место блока только на время повторного чтения ранее доступных условий.</summary>
+    private bool WasEligible;
+    /// <summary>Безопасная ошибка без служебных данных.</summary>
+    private string? Error;
+    /// <summary>Отмена предыдущего запроса исключает появление устаревшей цены.</summary>
+    private CancellationTokenSource? Pending;
+    /// <summary>При смене варианта очищает старую цену до первого await.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (PreviousVariant != VariantId) { Quantity = 1; QuantityText = "1"; PreviousVariant = VariantId; }
+        await LoadAsync();
+    }
+    /// <summary>Проверяет каждое изменение ввода; неверное значение блокирует также кнопку повторного расчёта.</summary>
+    private async Task ChangeQuantity(ChangeEventArgs args)
+    {
+        Price = null;
+        if (!int.TryParse(args.Value?.ToString(), out var quantity) || quantity is < 1 or > 1000000)
+        { Quantity = 0; Pending?.Cancel(); Loading = false; Error = "Введите целое количество от 1 до 1 000 000."; return; }
+        Quantity = quantity; await LoadAsync();
+    }
+    /// <summary>Повторно проверяет сессию, публикацию и право на опт; ответ старого запроса игнорируется.</summary>
+    private async Task LoadAsync()
+    {
+        if (Quantity < 1) return; // Ошибочный ввод не должен возвращать цену прежнего количества.
+        Pending?.Cancel(); Pending?.Dispose(); var pending = Pending = new();
+        WasEligible = Price is not null || WasEligible; Price = null; Loading = true; Error = null;
+        try { var price = await Account.PriceAsync(ProductId, VariantId, Quantity, pending.Token); if (!pending.IsCancellationRequested) { Price = price; WasEligible = price is not null; } }
+        catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
+        catch (Exception) { if (!pending.IsCancellationRequested) Error = "Не удалось проверить персональные условия. Попробуйте обновить страницу."; }
+        finally { if (!pending.IsCancellationRequested) Loading = false; }
+    }
+    /// <summary>Отменяет чтение при уходе с карточки.</summary>
+    public void Dispose() { Pending?.Cancel(); Pending?.Dispose(); }
+}

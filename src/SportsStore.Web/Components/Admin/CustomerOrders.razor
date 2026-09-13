@@ -1,0 +1,42 @@
+@page "/admin/customer-orders"
+@page "/admin/customer-orders/{Id:guid}"
+@inherits AdminPageBase
+@inject SportsStore.Application.Commerce.ICommerce Commerce
+@using SportsStore.Application.Commerce
+@using SportsStore.Web.Pages.Commerce
+@* Заказы покупателей отделены от закупок; Manager и Admin видят распределения и выполняют серверные переходы. *@
+<PageTitle>Заказы покупателей</PageTitle><h1>Заказы покупателей</h1><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if(Id is null) {
+<div class="admin-filters"><label>Номер или покупатель<input @bind="Term" maxlength="100" /></label><label>Статус<select @bind="State"><option value="">Все</option>@foreach(var s in Enum.GetValues<CustomerOrderStatus>()){<option value="@s">@CheckoutModel.Status(s)</option>}</select></label><button @onclick="SearchOrders">Показать</button></div>
+@if(Data is not null){<div class="table-wrap"><table><thead><tr><th>Номер</th><th>Создан</th><th>Покупатель</th><th>Статус</th><th>Сегмент</th><th>Сумма товаров</th><th>Резерв до</th></tr></thead><tbody>@foreach(var o in Data.Items){<tr><td><a href="/admin/customer-orders/@o.Id">@o.Number</a></td><td>@CheckoutModel.When(o.CreatedAt)</td><td>@o.Customer</td><td>@CheckoutModel.Status(o.Status)</td><td>@(o.Segment == CustomerSegment.Retail ? "Розница" : "Опт")</td><td>@Money(o.Total)</td><td>@CheckoutModel.When(o.ReserveUntil)</td></tr>}</tbody></table></div><div class="pager"><button disabled="@(Data.Page == 1)" @onclick="() => PageTo(Data.Page-1)">Назад</button><span>Найдено @Data.Count</span><button disabled="@(Data.Page*25 >= Data.Count)" @onclick="() => PageTo(Data.Page+1)">Далее</button></div>}
+} else if(Order is { } o) {
+<a href="/admin/customer-orders">Все заказы</a><section class="admin-panel"><h2>@o.Number · @CheckoutModel.Status(o.Status)</h2><p>@o.ContactName · @o.Email · @o.Phone</p><p>@o.Recipient · @o.Address · @o.PostalCode</p><p>@o.Organization @o.Inn @o.Kpp</p><p>Сумма товаров: @Money(o.GoodsTotal). Резерв до @CheckoutModel.When(o.ReserveUntil)</p>@foreach(var l in o.Lines){<p>@l.Sku · @l.Name · @l.Size @l.Color · @l.Quantity.ToString("0") @l.Unit × @Money(l.UnitPrice-l.UnitDiscount)</p>}<h3>Распределение резерва</h3>@foreach(var r in o.Reservations){<p>@r.Sku · @r.Warehouse · @r.Quantity · @(r.Active ? "Активен" : "Освобождён")</p>}
+@if(o.Status is CustomerOrderStatus.AwaitingConfirmation or CustomerOrderStatus.Confirmed){<label>Причина действия<textarea @bind="Reason" @bind:event="oninput" maxlength="500"></textarea></label><div class="form-actions">@if(o.Status == CustomerOrderStatus.AwaitingConfirmation){<button disabled="@Busy" @onclick='() => Change("confirm")'>Подтвердить заказ</button>}<button disabled="@Busy" @onclick='() => Change("cancel")'>Отменить заказ</button></div><label>Новый срок (UTC+5)<input type="datetime-local" @bind="Until" /></label><button disabled="@Busy" @onclick='() => Change("extend")'>Продлить резерв</button>}
+<h3>История</h3>@foreach(var h in o.History){<p>@CheckoutModel.When(h.At) · @CheckoutModel.Status(h.Status) · @h.Reason</p>}</section>
+}
+@code {
+    /// <summary>Выбранный заказ; null означает список.</summary>
+    [Parameter] public Guid? Id { get; set; }
+    /// <summary>Страница серверных результатов.</summary>
+    private OrderPage? Data;
+    /// <summary>Снимок выбранного заказа.</summary>
+    private CustomerOrderView? Order;
+    /// <summary>Поиск по номеру и имени.</summary>
+    private string Term = "";
+    /// <summary>Необязательный фильтр состояния.</summary>
+    private CustomerOrderStatus? State;
+    /// <summary>Публичное объяснение действия сотрудника.</summary>
+    private string Reason = "";
+    /// <summary>Введённое время ХМАО; преобразуется в UTC перед командой.</summary>
+    private DateTime Until = DateTime.UtcNow.AddDays(2).AddHours(5);
+    /// <summary>Загружает данные маршрута с проверкой Staff на сервере.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Читает ограниченный список либо снимок.</summary>
+    private async Task Load() { if(Id is Guid id) Order = await Commerce.OrderAsync(id, true, Cancellation.Token); else Data = await Commerce.OrdersAsync(true, Term, State, Page, Cancellation.Token); }
+    /// <summary>Возвращает поиск на первую страницу.</summary>
+    private Task SearchOrders() { Page = 1; return RunAsync(Load); }
+    /// <summary>Перечитывает нужную страницу.</summary>
+    private Task PageTo(int page) { Page = page; return RunAsync(Load); }
+    /// <summary>Отправляет версию и идемпотентный ключ; состав и цена не редактируются.</summary>
+    private Task Change(string action) => RunAsync(async () => { await Commerce.ChangeOrderAsync(Order!.Id, Order.Version, action, Reason, action == "extend" ? new DateTimeOffset(DateTime.SpecifyKind(Until, DateTimeKind.Unspecified), TimeSpan.FromHours(5)).UtcDateTime : null, OperationId, true, Cancellation.Token); OperationId = Guid.NewGuid(); await Load(); }, true);
+}

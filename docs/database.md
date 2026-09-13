@@ -30,7 +30,7 @@ PostgreSQL + EF Core Code First. Все бизнес-таблицы и ASP.NET C
 | Закупочные цены | SupplierOfferPrice — текущая цена по уровню; SupplierPriceHistory — старое/новое значение, партия, UTC |
 | Импорт | ImportBatch — SHA-256, дата, версия, статус, ожидаемая ревизия и счётчики; ImportRow — номер, JSON исходных ячеек, нормализованная запись, диагностика |
 | Клиенты | Customer — правовой тип, коммерческий сегмент и статус подтверждения; OrganizationProfile — ИНН/КПП; CustomerAddress |
-| Продажные цены | MarkupRule — правило области и количественной ступени; PricingSettings — отдельный минимум заказа и явное автоприменение; SalePrice — опубликованная цена, manual flag; SalePriceHistory; PriceProposal |
+| Продажные цены | MarkupRule — правило области и количественной ступени; PricingSettings — совместимость старых расчётов и явное автоприменение; общий минимум больше не используется; SalePrice — опубликованная цена, manual flag; SalePriceHistory; PriceProposal |
 | Остатки | Warehouse; InventoryBalance — OnHand/Reserved и xmin |
 | Основа заказов | Order — контактный/адресный/организационный снимок, валюта и формат продажи; OrderItem — SKU/название/единица/количество/фактическая цена/скидка |
 | Идентификация | Стандартные AspNetUsers, AspNetRoles, claims, logins, tokens и joins. Роли Admin/Manager/Customer; seed паролей отсутствует |
@@ -159,3 +159,52 @@ CHECK ограничивает количество строки 1…1 000 000, 
 Применение новой миграции, резервное копирование и восстановление выполняются теми же командами EF/pg_dump/pg_restore, что описаны выше. Откат Down удаляет закупочную историю и не предназначен для обычного обновления.
 
 Дополнительная миграция `20260911180503_PreserveReceivedSupplierUnit` хранит единицу UnallocatedStock независимо от текущего прайса. Если единицы различаются, распределение и смешивание остатков запрещены; для старой несверенной записи пустая единица также блокирует перенос. Миграция не угадывает перевод по новой строке поставщика.
+
+
+## Публичное чтение, этап 3
+
+Схема не изменена. StorefrontService читает Published и положительные базовые Retail/RUB-цены, фильтрует один вариант в SQL и использует RepeatableRead для согласования страницы и счётчиков. Закупочные суммы в DTO не попадают. Дерево категорий строится рекурсивным CTE. Правила и измерения: [storefront.md](storefront.md).
+
+
+## Четвёртый этап: аккаунты и заявки
+
+Миграция `CustomerAccountsWholesale` добавляет три таблицы, не меняя существующие Customer и AspNetUsers. Все новые таблицы и колонки имеют русские комментарии. Сохраняются строковый ключ Identity и уникальная nullable-связь Customer.ApplicationUserId.
+
+- **WholesaleApplication** — снимок реквизитов, состояние, время подачи/решения UTC, версия xmin и OperationId. Частичный уникальный индекс запрещает две Pending-заявки одного Customer.
+- **WholesaleDecision** — неизменяемое событие одобрения, отказа или отзыва; nullable ApplicationId означает прямое решение без заявки. OperationId уникален.
+- **NotificationOutbox** — одно уведомление на решение, число попыток, время следующей попытки, аренда, SentAt и безопасный код ошибки. Открытые Identity-токены и реквизиты здесь не хранятся.
+
+```mermaid
+erDiagram
+    AspNetUsers ||--o| Customer : "ApplicationUserId"
+    Customer ||--o{ CustomerAddress : "собственные адреса"
+    Customer ||--o| OrganizationProfile : "текущие реквизиты"
+    Customer ||--o{ WholesaleApplication : "неизменяемые снимки"
+    Customer ||--o{ WholesaleDecision : "история условий"
+    WholesaleApplication o|--o{ WholesaleDecision : "основание"
+    WholesaleDecision ||--o| NotificationOutbox : "отправка после commit"
+```
+
+FK истории используют Restrict; каскадное уничтожение решений вместе с покупателем запрещено. `Customer` блокируется до работы с заявкой, проверяются xmin и снимок. Команда решения сохраняет Customer, заявку, историю, аудит и outbox в одной транзакции. Старые Approved-покупатели сохраняются без синтетических заявок.
+
+Локальное резервное копирование прежним `pg_dump` включает новые таблицы. Вместе с базой отдельно защищайте постоянные ключи Data Protection: они нужны для действующих cookie и ссылок Identity. Файлы Capture с временными токенами не являются необходимой частью резервной копии бизнес-данных.
+
+## Этап 5: покупательские заказы
+
+Добавлены Cart (владелец: Customer либо hash гостя), CartItem (уникальный вариант корзины), CartOperation (ключ добавления), CheckoutPreview (условия и TTL), OrderReservation (распределение по складам), OrderEvent (идемпотентная история), OrderNotification (аренда и повторы). Order/OrderItem расширены снимками и состоянием, существующие таблицы не заменены. Все новые сущности используют xmin; числовые количества и цены decimal. Русские комментарии таблиц/полей включены в миграцию.
+
+```mermaid
+erDiagram
+ Customer ||--o{ Cart : owns
+ Cart ||--o{ CartItem : contains
+ ProductVariant ||--o{ CartItem : selected
+ Cart ||--o{ CheckoutPreview : confirms
+ Cart ||--o| Order : converts
+ Order ||--o{ OrderItem : snapshots
+ OrderItem ||--o{ OrderReservation : reserves
+ Warehouse ||--o{ OrderReservation : allocates
+ Order ||--o{ OrderEvent : records
+ OrderEvent ||--|| OrderNotification : queues
+```
+
+FK Restrict сохраняют историю. Уникальны CheckoutOperationId, CartId заказа, OperationId события и EventId уведомления. Старые заказы Historical не получают фиктивные резервы; итог восстанавливается из прежних строк. Подробности в reservations.md и customer-orders.md.

@@ -212,7 +212,7 @@ internal static class RussianDatabaseComments
             foreach (var property in entity.GetProperties())
             {
                 property.SetComment(fields.TryGetValue($"{table}.{property.Name}", out var comment)
-                    ? comment : common[property.Name]);
+                    ? comment : common.TryGetValue(property.Name, out var shared) ? shared : property.GetComment() ?? throw new InvalidOperationException("Отсутствует комментарий нового поля."));
             }
         }
     }

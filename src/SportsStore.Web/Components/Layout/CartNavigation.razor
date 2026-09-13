@@ -1,0 +1,9 @@
+@inject SportsStore.Application.Commerce.ICommerce Commerce
+@* Счётчик серверной корзины без персональной цены и без чтения чужой корзины по GUID. *@
+<a href="/cart" data-enhance-nav="false" aria-label="@($"Корзина, {Count} товаров")">Корзина (@Count)</a>
+@code {
+    /// <summary>Количество выбранных единиц; ноль до первого добавления.</summary>
+    private decimal Count;
+    /// <summary>Читает только текущую корзину; ошибка БД не ломает шапку магазина.</summary>
+    protected override async Task OnInitializedAsync() { try { Count = (await Commerce.CartAsync()).Lines.Sum(x => x.Quantity); } catch (Exception) { Count = 0; } }
+}

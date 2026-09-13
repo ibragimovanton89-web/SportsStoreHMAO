@@ -46,7 +46,7 @@
 
 Сначала выбирается область правила: вариант, ближайшая категория по пути к корню, общее правило. Затем выбирается максимальная подходящая нижняя граница количества внутри этой области. Отсутствие подходящей ступени не переключает на более слабую область.
 
-`PriceProposal.Fingerprint` обнаруживает изменение исходных параметров между расчётом и применением. Ручная цена защищена. `QuoteAsync` получает доверенный идентификатор пользователя от сервера, проверяет подтверждение опта и не заменяет отсутствующую оптовую цену розничной. Собственный минимум оптового заказа — отдельная настройка, возвращаемая для дальнейшей проверки суммы заказа.
+`PriceProposal.Fingerprint` обнаруживает изменение исходных параметров между расчётом и применением. Ручная цена защищена. `QuoteAsync` получает доверенный идентификатор пользователя от сервера, проверяет подтверждение опта и не заменяет отсутствующую оптовую цену розничной. Общий минимум оптового заказа удалён из пользовательского сценария; совместимое поле PriceQuote.MinimumWholesaleOrder всегда null.
 
 ## Контексты, даты и безопасность
 
@@ -78,3 +78,26 @@ Get-Help ./scripts/Initialize-Local.ps1 -Full
 Domain: PurchaseStatus, PurchaseOrder, PurchaseOrderLine, PurchaseReceiptLine, UnallocatedStock. Отображения — отдельные IEntityTypeConfiguration в Infrastructure/Persistence/Configurations; миграция SupplierPurchasingAndReceiving и model snapshot сохраняют Code First.
 
 Web: Purchases, PurchaseEditor, Stock, PurchaseCard и Shared/PurchaseRetailEditor. Публичные StoreCatalog и StoreProductPage используют отдельный IStorefront/StorefrontService без административных DTO. Модульные серверные сценарии в PurchasingTests расширяют PostgreSQL-фикстуру AdminTests. Пользовательский порядок действий — docs/purchasing.md.
+
+## Покупательская витрина, этап 3
+
+- `Application/Storefront/CatalogQuery.cs` — типизированные границы поиска, фильтров, сортировки и фасетов. `IStorefront.cs` — только публичные DTO, включая Id варианта, подтверждённый артикул и признак разных цен.
+- `Infrastructure/Services/StorefrontService.cs` — единый розничный запрос Published + SalePrice, SQL-фильтрация одного варианта, рекурсивные категории, RepeatableRead и пакетное чтение. Не вызывает расчёт цен и не пишет данные.
+- `Web/Storefront/CatalogUrls.cs` — нормализация URL, безопасный возврат, canonical из настроенного origin. Покупательский сегмент в URL отсутствует.
+- `StoreCatalog.razor` — GET-форма и серверная выдача; `StoreProductPage.razor` — NotFound, варианты и клавиатурная галерея. `storefront.css` отделён от административной темы. В App только каталог получает интерактивность с SSR.
+- `StorefrontTests.cs`, `CatalogUrlTests.cs`, `StorefrontFixture.cs` — изолированные проверки публичности, SQL, фильтров, цен, поступлений и адресов. Новых миграций нет.
+
+Полный контракт, ограничения и подготовка следующего этапа: [storefront.md](storefront.md).
+
+
+## Покупательский кабинет (этап 4)
+
+Начните с `Application/Customers/CustomerContracts.cs` и `EmailContracts.cs`: отдельные allowlist DTO без административных полномочий. `Infrastructure/Customers/CustomerAccess.cs` задаёт границу доверия, `CustomerAccount.cs` реализует владение профилем/адресами/заявками и персональную цену. `WholesaleWorkflow.cs` используется и `WholesaleAdministration`, и прежним `AdminPeople`.
+
+`CustomerRegistration.cs` владеет отдельным scoped Identity-контекстом и транзакцией регистрации. `CustomerEmailTransport.cs` отвечает только за транспорт, `NotificationProcessor.cs` — за аренду и повторы зафиксированного outbox. `Web/Pages/Customer/Index.cshtml*` содержит HTTP-формы и cookie-сценарии; `CustomerWholesalePrice.razor` — отдельный персональный блок без расширения публичных DTO закупочными данными. `Web/Security/CustomerSecurity.cs` адаптирует доверенный principal, а StaffSecurity сохраняет самостоятельную строгую Staff-policy.
+
+## Корзина и резервирование
+
+Начните с `Application/Commerce/ICommerce.cs` и `CommerceContracts.cs`. `Infrastructure/Commerce/CommerceService.cs` реализует владельца корзины, пересчёт, preview и атомарный checkout; `CommerceOrders.cs` — историю, команды сотрудника и освобождение. `CommerceWorker.cs` обрабатывает истечение и отдельную очередь писем. `Pricing/SalePriceSelection.cs` задаёт общий допустимый набор цен для PricingService и корзины.
+
+`Web/Security/GuestCartIdentity.cs` защищает гостевой ключ. `Pages/Commerce/Checkout.cshtml(.cs)` обслуживает SSR-формы корзины/оформления/истории с antiforgery; `Components/Admin/CustomerOrders.razor` — сотрудника. `CommerceTests` и `CommerceIntegrityTests` работают через реальные миграции PostgreSQL на изолированных БД.

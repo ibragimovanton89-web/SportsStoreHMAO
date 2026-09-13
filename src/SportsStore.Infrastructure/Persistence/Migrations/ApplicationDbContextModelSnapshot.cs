@@ -292,6 +292,144 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SportsStore.Domain.Entities.Cart", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время создания, UTC.");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasComment("Владелец-покупатель; null только у гостя.");
+
+                    b.Property<string>("GuestKeyHash")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("SHA-256 случайного гостевого секрета; сам секрет в БД не хранится.");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Состояние активной, объединённой или оформленной корзины.");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время изменения состава, UTC.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique()
+                        .HasFilter("\"State\" = 'Active' AND \"CustomerId\" IS NOT NULL");
+
+                    b.HasIndex("GuestKeyHash")
+                        .IsUnique();
+
+                    b.ToTable("Cart", null, t =>
+                        {
+                            t.HasComment("Серверная корзина одного покупателя либо гостевого секрета; преобразованная корзина больше не редактируется.");
+
+                            t.HasCheckConstraint("CK_Cart_Owner", "(\"CustomerId\" IS NULL) <> (\"GuestKeyHash\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_Cart_State", "\"State\" IN ('Active', 'Merged', 'Converted')");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CartItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<Guid>("CartId")
+                        .HasColumnType("uuid")
+                        .HasComment("Корзина-владелец строки.");
+
+                    b.Property<Guid>("ProductVariantId")
+                        .HasColumnType("uuid")
+                        .HasComment("Выбранный вариант; связь сохраняет недоступную строку для явного удаления.");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasComment("Целое количество; после объединения превышение лимита требует исправления покупателем.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductVariantId");
+
+                    b.HasIndex("CartId", "ProductVariantId")
+                        .IsUnique();
+
+                    b.ToTable("CartItem", null, t =>
+                        {
+                            t.HasComment("Выбранное количество одного варианта; цена проверяется заново и здесь не хранится.");
+
+                            t.HasCheckConstraint("CK_CartItem_Quantity", "\"Quantity\" > 0 AND trunc(\"Quantity\") = \"Quantity\"");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CartOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<Guid>("CartId")
+                        .HasColumnType("uuid")
+                        .HasComment("Корзина, к которой относилась команда.");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Уникальный ключ добавления.");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasComment("Добавляемое количество для проверки повторного запроса.");
+
+                    b.Property<Guid>("VariantId")
+                        .HasColumnType("uuid")
+                        .HasComment("Идентификатор варианта команды.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CartId");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.ToTable("CartOperation", null, t =>
+                        {
+                            t.HasComment("Ключ повторяемого добавления в корзину с проверкой неизменности команды.");
+                        });
+                });
+
             modelBuilder.Entity("SportsStore.Domain.Entities.Category", b =>
                 {
                     b.Property<Guid>("Id")
@@ -324,6 +462,66 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                             t.HasComment("Иерархия категорий собственного каталога; циклические связи запрещены.");
 
                             t.HasCheckConstraint("CK_Category_Valid", "\"ParentId\" IS NULL OR \"ParentId\" <> \"Id\"");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CheckoutPreview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<Guid>("AddressId")
+                        .HasColumnType("uuid")
+                        .HasComment("Выбранный собственный адрес для повторной проверки.");
+
+                    b.Property<Guid>("CartId")
+                        .HasColumnType("uuid")
+                        .HasComment("Корзина, состав которой проверялся.");
+
+                    b.Property<long>("CartVersion")
+                        .HasColumnType("bigint")
+                        .HasComment("Версия корзины при подготовке; сравнение фактических условий имеет приоритет.");
+
+                    b.Property<string>("ConditionsJson")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasComment("Неизменяемый снимок подтверждаемых условий, включая контакты; не для журналов.");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время создания, UTC.");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasComment("Покупатель, подтвердивший условия.");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Срок действия подтверждения, UTC.");
+
+                    b.Property<string>("Fingerprint")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("SHA-256 нормализованных условий, не самостоятельное средство авторизации.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CartId");
+
+                    b.HasIndex("CustomerId", "ExpiresAt");
+
+                    b.ToTable("CheckoutPreview", null, t =>
+                        {
+                            t.HasComment("Серверные условия оформления; персональные данные доступны только владельцу.");
                         });
                 });
 
@@ -704,11 +902,81 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SportsStore.Domain.Entities.NotificationOutbox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Идентификатор уведомления.");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasComment("Количество начатых попыток доставки.");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время постановки в очередь, UTC.");
+
+                    b.Property<Guid>("DecisionId")
+                        .HasColumnType("uuid")
+                        .HasComment("Решение, вызвавшее единственное логическое уведомление.");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Безопасный код ошибки без персональных данных и SMTP-ответа.");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Окончание аренды обработчиком, UTC; null без аренды.");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время следующей допустимой попытки, UTC.");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Подтверждённая отправка, UTC; null до отправки.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для защиты аренды обработчика.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DecisionId")
+                        .IsUnique();
+
+                    b.HasIndex("SentAt", "NextAttemptAt");
+
+                    b.ToTable("NotificationOutbox", null, t =>
+                        {
+                            t.HasComment("Очередь уведомлений по опту без токенов и полных реквизитов.");
+
+                            t.HasCheckConstraint("CK_NotificationOutbox_Attempts", "\"Attempts\" >= 0");
+                        });
+                });
+
             modelBuilder.Entity("SportsStore.Domain.Entities.Order", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasComment("Уникальный идентификатор записи (первичный ключ).");
+
+                    b.Property<Guid?>("CartId")
+                        .HasColumnType("uuid")
+                        .HasComment("Оформленная корзина; уникальна, null у исторических заказов.");
+
+                    b.Property<Guid?>("CheckoutOperationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Ключ оформления; null у исторических записей.");
+
+                    b.Property<string>("ConditionsFingerprint")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Отпечаток подтверждённых условий.");
 
                     b.Property<string>("ContactEmail")
                         .IsRequired()
@@ -742,6 +1010,17 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasComment("Необязательная ссылка на покупателя; исполнение и история используют снимки данных в заказе.");
 
+                    b.Property<string>("CustomerKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Снимок правового типа покупателя.");
+
+                    b.Property<decimal>("GoodsTotal")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasComment("Сумма сохранённых строк без неопределённой доставки.");
+
                     b.Property<string>("Inn")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -763,6 +1042,24 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasComment("Снимок наименования организации или ИП на момент заказа; NULL, если неприменимо.");
 
+                    b.Property<string>("PostalCode")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок индекса; null, если не указан.");
+
+                    b.Property<Guid?>("PreviewId")
+                        .HasColumnType("uuid")
+                        .HasComment("Подтверждённый серверный preview.");
+
+                    b.Property<string>("RecipientName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок получателя выбранного адреса.");
+
+                    b.Property<DateTime?>("ReserveUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Конечный срок активного резерва, UTC.");
+
                     b.Property<string>("SalesFormat")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -775,6 +1072,16 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(500)")
                         .HasComment("Снимок адреса доставки на момент заказа; изменения адресов покупателя его не меняют.");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Исторические записи не получают фиктивного резерва.");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время последнего перехода, UTC.");
+
                     b.Property<uint>("Version")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -784,16 +1091,98 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CartId")
+                        .IsUnique();
+
+                    b.HasIndex("CheckoutOperationId")
+                        .IsUnique();
+
                     b.HasIndex("CustomerId");
 
                     b.HasIndex("Number")
                         .IsUnique();
 
+                    b.HasIndex("PreviewId");
+
+                    b.HasIndex("Status", "ReserveUntil");
+
                     b.ToTable("Order", null, t =>
                         {
                             t.HasComment("Основа заказов со снимками контактов, адреса и реквизитов на момент оформления.");
 
+                            t.HasCheckConstraint("CK_Order_CustomerKind", "\"CustomerKind\" IN ('Individual', 'SoleProprietor', 'Organization')");
+
                             t.HasCheckConstraint("CK_Order_SalesFormat", "\"SalesFormat\" IN ('Retail', 'Wholesale')");
+
+                            t.HasCheckConstraint("CK_Order_Status", "\"Status\" IN ('Historical', 'AwaitingConfirmation', 'Confirmed', 'Cancelled', 'Expired')");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Служебный автор события; не выдаётся покупателю.");
+
+                    b.Property<string>("CommandFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Отпечаток типа команды и её аргументов для безопасного повтора.");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время события, UTC.");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Уникальный ключ команды изменения.");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasComment("Заказ, к которому относится событие.");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Публичное объяснение перехода без внутренних заметок.");
+
+                    b.Property<DateTime?>("ReserveUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Срок резерва после команды, UTC.");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Состояние после команды.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("OrderId", "OccurredAt");
+
+                    b.ToTable("OrderEvent", null, t =>
+                        {
+                            t.HasComment("Неизменяемая история переходов покупательского заказа и идемпотентных команд.");
+
+                            t.HasCheckConstraint("CK_OrderEvent_Status", "\"Status\" IN ('Historical', 'AwaitingConfirmation', 'Confirmed', 'Cancelled', 'Expired')");
                         });
                 });
 
@@ -802,6 +1191,16 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasComment("Уникальный идентификатор записи (первичный ключ).");
+
+                    b.Property<string>("Color")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок цвета; null, если неприменим.");
+
+                    b.Property<decimal>("MinimumQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasComment("Нижняя включительная граница ступени: количество одного SKU в единицах продажи магазина.");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -827,6 +1226,11 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
                         .HasComment("Снимок единицы продажи на момент заказа.");
+
+                    b.Property<string>("Size")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок размера; null, если неприменим.");
 
                     b.Property<string>("Sku")
                         .IsRequired()
@@ -862,6 +1266,128 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                             t.HasComment("Строки заказа со снимками товара, количества, цены и скидки; изменения каталога не меняют историю заказа.");
 
                             t.HasCheckConstraint("CK_OrderItem_Valid", "\"Quantity\" > 0 AND \"UnitPrice\" >= 0 AND \"UnitDiscount\" >= 0 AND \"UnitDiscount\" <= \"UnitPrice\"");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasComment("Число начатых попыток; не более пяти.");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время постановки, UTC.");
+
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasComment("Уникальное событие, намерение отправки которого создано в той же транзакции.");
+
+                    b.Property<string>("LastErrorCode")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Безопасный код ошибки без адресов, писем и секретов.");
+
+                    b.Property<DateTimeOffset?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Аренда обработчика, UTC; null вне обработки.");
+
+                    b.Property<DateTimeOffset>("NextAttemptAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Ближайшее время повтора, UTC.");
+
+                    b.Property<DateTimeOffset?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Момент подтверждения отправки транспортом, UTC.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventId")
+                        .IsUnique();
+
+                    b.HasIndex("SentAt", "NextAttemptAt");
+
+                    b.ToTable("OrderNotification", null, t =>
+                        {
+                            t.HasComment("Отдельная очередь писем о заказах; не использует фиктивные решения об опте.");
+
+                            t.HasCheckConstraint("CK_OrderNotification_Attempts", "\"Attempts\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderReservation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Устойчивый идентификатор записи.");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean")
+                        .HasComment("True до однократного освобождения.");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Момент резервирования, UTC.");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasComment("Заказ-владелец резерва.");
+
+                    b.Property<Guid>("OrderItemId")
+                        .HasColumnType("uuid")
+                        .HasComment("Строка, для которой выделено количество.");
+
+                    b.Property<Guid>("ProductVariantId")
+                        .HasColumnType("uuid")
+                        .HasComment("Вариант резервируемого товара.");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasComment("Положительное зарезервированное количество в единицах продажи.");
+
+                    b.Property<DateTime?>("ReleasedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Момент освобождения, UTC; null у активного резерва.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для конкурентных изменений.");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid")
+                        .HasComment("Склад, на котором увеличен Reserved.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("ProductVariantId");
+
+                    b.HasIndex("WarehouseId");
+
+                    b.HasIndex("OrderItemId", "WarehouseId")
+                        .IsUnique();
+
+                    b.ToTable("OrderReservation", null, t =>
+                        {
+                            t.HasComment("Распределение резерва конкретной строки заказа по собственному складу.");
+
+                            t.HasCheckConstraint("CK_OrderReservation_Positive", "\"Quantity\" > 0");
                         });
                 });
 
@@ -2005,6 +2531,162 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("SportsStore.Domain.Entities.WholesaleApplication", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Идентификатор заявки.");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Текст обращения покупателя.");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasComment("Покупатель — владелец заявки.");
+
+                    b.Property<string>("Inn")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок ИНН; null для физлица.");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Снимок правового типа покупателя.");
+
+                    b.Property<string>("Kpp")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок КПП; null, если неприменим.");
+
+                    b.Property<string>("LegalName")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Снимок официального наименования; null для физлица.");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Уникальная команда подачи для защиты от повтора.");
+
+                    b.Property<string>("PublicReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Доступная покупателю причина результата.");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время последнего решения, UTC; null до рассмотрения.");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Служебный идентификатор автора решения.");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Pending: проверка; Approved: одобрено; Rejected: отказ; Withdrawn: отзыв заявки; Revoked: отзыв опта.");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время подачи, UTC.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Версия xmin для защиты от устаревшего решения.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Pending'");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("CustomerId", "SubmittedAt");
+
+                    b.ToTable("WholesaleApplication", null, t =>
+                        {
+                            t.HasComment("Заявки покупателей на опт с неизменяемыми снимками реквизитов.");
+
+                            t.HasCheckConstraint("CK_WholesaleApplication_Kind", "\"Kind\" IN ('Individual', 'SoleProprietor', 'Organization')");
+
+                            t.HasCheckConstraint("CK_WholesaleApplication_Status", "\"Status\" IN ('Pending', 'Approved', 'Rejected', 'Withdrawn', 'Revoked')");
+                        });
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.WholesaleDecision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasComment("Идентификатор решения.");
+
+                    b.Property<string>("ActorId")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Доверенный автор решения; не раскрывается покупателю.");
+
+                    b.Property<Guid?>("ApplicationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Заявка-основание; null для ручного решения без заявки.");
+
+                    b.Property<Guid>("CustomerId")
+                        .HasColumnType("uuid")
+                        .HasComment("Покупатель, чьи условия изменились.");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasComment("Время решения, UTC.");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uuid")
+                        .HasComment("Уникальный идентификатор команды изменения.");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasComment("Результат рассмотрения или отзыва права на опт.");
+
+                    b.Property<string>("PublicReason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasComment("Объяснение, доступное покупателю.");
+
+                    b.Property<uint>("Version")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin")
+                        .HasComment("Системная версия xmin.");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApplicationId");
+
+                    b.HasIndex("OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("CustomerId", "OccurredAt");
+
+                    b.ToTable("WholesaleDecision", null, t =>
+                        {
+                            t.HasComment("Неизменяемая история решений по опту, включая ручные решения без заявки.");
+
+                            t.HasCheckConstraint("CK_WholesaleDecision_Outcome", "\"Outcome\" IN ('Pending', 'Approved', 'Rejected', 'Withdrawn', 'Revoked')");
+                        });
+                });
+
             modelBuilder.Entity("SportsStore.Infrastructure.Identity.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -2138,12 +2820,59 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SportsStore.Domain.Entities.Cart", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CartItem", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Cart", null)
+                        .WithMany()
+                        .HasForeignKey("CartId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SportsStore.Domain.Entities.ProductVariant", null)
+                        .WithMany()
+                        .HasForeignKey("ProductVariantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CartOperation", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Cart", null)
+                        .WithMany()
+                        .HasForeignKey("CartId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SportsStore.Domain.Entities.Category", b =>
                 {
                     b.HasOne("SportsStore.Domain.Entities.Category", null)
                         .WithMany()
                         .HasForeignKey("ParentId")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.CheckoutPreview", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Cart", null)
+                        .WithMany()
+                        .HasForeignKey("CartId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SportsStore.Domain.Entities.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SportsStore.Domain.Entities.Customer", b =>
@@ -2209,12 +2938,40 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("SportsStore.Domain.Entities.NotificationOutbox", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.WholesaleDecision", null)
+                        .WithOne()
+                        .HasForeignKey("SportsStore.Domain.Entities.NotificationOutbox", "DecisionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SportsStore.Domain.Entities.Order", b =>
                 {
+                    b.HasOne("SportsStore.Domain.Entities.Cart", null)
+                        .WithMany()
+                        .HasForeignKey("CartId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("SportsStore.Domain.Entities.Customer", null)
                         .WithMany()
                         .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("SportsStore.Domain.Entities.CheckoutPreview", null)
+                        .WithMany()
+                        .HasForeignKey("PreviewId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderEvent", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SportsStore.Domain.Entities.OrderItem", b =>
@@ -2229,6 +2986,42 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ProductVariantId")
                         .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderNotification", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.OrderEvent", null)
+                        .WithMany()
+                        .HasForeignKey("EventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.OrderReservation", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SportsStore.Domain.Entities.OrderItem", null)
+                        .WithMany()
+                        .HasForeignKey("OrderItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SportsStore.Domain.Entities.ProductVariant", null)
+                        .WithMany()
+                        .HasForeignKey("ProductVariantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("SportsStore.Domain.Entities.Warehouse", null)
+                        .WithMany()
+                        .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("SportsStore.Domain.Entities.OrganizationProfile", b =>
@@ -2454,6 +3247,29 @@ namespace SportsStore.Infrastructure.Persistence.Migrations
                     b.HasOne("SportsStore.Domain.Entities.Warehouse", null)
                         .WithMany()
                         .HasForeignKey("WarehouseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.WholesaleApplication", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SportsStore.Domain.Entities.WholesaleDecision", b =>
+                {
+                    b.HasOne("SportsStore.Domain.Entities.WholesaleApplication", null)
+                        .WithMany()
+                        .HasForeignKey("ApplicationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("SportsStore.Domain.Entities.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

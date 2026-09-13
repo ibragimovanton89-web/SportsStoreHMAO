@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -61,14 +63,13 @@ public sealed class StaffAuthenticationStateProvider(ILoggerFactory logger, IDbC
 {
     /// <summary>Период фоновой проверки открытой вкладки; не заменяет проверку каждой команды.</summary>
     protected override TimeSpan RevalidationInterval => TimeSpan.FromSeconds(15);
-    /// <summary>Проверяет свежую учётную запись и наличие хотя бы одной роли сотрудника.</summary>
+    /// <summary>Проверяет свежую учётную запись покупателя или сотрудника; административная роль и MFA проверяются отдельной policy.</summary>
     protected override async Task<bool> ValidateAuthenticationStateAsync(AuthenticationState state, CancellationToken ct)
     {
         if (DevelopmentAdminAccess.IsDevelopmentPrincipal(state.User)) return true;
         var session = WebAdminIdentity.Session(state.User);
         await using var db = await factory.CreateDbContextAsync(ct);
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == session.UserId, ct);
-        return user is not null && user.EmailConfirmed && user.SecurityStamp == session.SecurityStamp && !(user.LockoutEnd > DateTimeOffset.UtcNow)
-            && await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id where ur.UserId == user.Id && (r.Name == "Admin" || r.Name == "Manager") select ur).AnyAsync(ct);
+        return user is not null && user.EmailConfirmed && user.SecurityStamp == session.SecurityStamp && !(user.LockoutEnd > DateTimeOffset.UtcNow);
     }
 }

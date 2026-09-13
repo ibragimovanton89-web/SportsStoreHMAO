@@ -26,5 +26,27 @@ public sealed class Order : Entity
     public string? Inn { get; set; }
     /// <summary>Снимок КПП на момент заказа; NULL, если неприменимо.</summary>
     public string? Kpp { get; set; }
+    /// <summary>Исторические записи не получают фиктивного резерва.</summary>
+    public CustomerOrderStatus Status { get; set; } = CustomerOrderStatus.Historical;
+    /// <summary>Время последнего перехода, UTC.</summary>
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Конечный срок активного резерва, UTC.</summary>
+    public DateTime? ReserveUntil { get; set; } = null;
+    /// <summary>Сумма сохранённых строк без неопределённой доставки.</summary>
+    public decimal GoodsTotal { get; set; }
+    /// <summary>Оформленная корзина; уникальна, null у исторических заказов.</summary>
+    public Guid? CartId { get; set; } = null;
+    /// <summary>Ключ оформления; null у исторических записей.</summary>
+    public Guid? CheckoutOperationId { get; set; } = null;
+    /// <summary>Подтверждённый серверный preview.</summary>
+    public Guid? PreviewId { get; set; } = null;
+    /// <summary>Отпечаток подтверждённых условий.</summary>
+    public string? ConditionsFingerprint { get; set; } = null;
+    /// <summary>Снимок получателя выбранного адреса.</summary>
+    public string? RecipientName { get; set; } = null;
+    /// <summary>Снимок индекса; null, если не указан.</summary>
+    public string? PostalCode { get; set; } = null;
+    /// <summary>Снимок правового типа покупателя.</summary>
+    public CustomerKind CustomerKind { get; set; } = CustomerKind.Individual;
 }
 

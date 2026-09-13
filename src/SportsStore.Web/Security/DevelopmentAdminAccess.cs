@@ -9,6 +9,14 @@ public static class DevelopmentAdminAccess
     /// <summary>Ключ явного включения временного режима; читается только при запуске.</summary>
     public const string ConfigurationKey = "Development:BypassAdminAuthentication";
 
+    /// <summary>Разрешает локальный обход только без настоящей сессии: cookie покупателя или сотрудника нельзя заменять тестовым Admin.</summary>
+    /// <param name="principal">Личность после стандартного middleware аутентификации.</param>
+    /// <param name="address">Адрес непосредственного соединения.</param>
+    /// <param name="host">Host запроса без порта.</param>
+    /// <returns>True только для анонимного локального запроса.</returns>
+    public static bool ShouldBypass(ClaimsPrincipal principal, IPAddress? address, string host) =>
+        !principal.Identities.Any(identity => identity.IsAuthenticated) && IsLocalRequest(address, host);
+
     /// <summary>Запрещает включённый тестовый вход вне Development вместо молчаливого запуска с ослабленной защитой.</summary>
     /// <param name="environment">Среда запуска хоста.</param>
     /// <param name="enabled">Явно установленный флаг тестового входа.</param>

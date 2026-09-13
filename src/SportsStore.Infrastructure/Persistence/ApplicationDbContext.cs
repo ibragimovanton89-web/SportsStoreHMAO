@@ -7,6 +7,26 @@ namespace SportsStore.Infrastructure.Persistence;
 /// <param name="options">Параметры подключения и модели создаваемых контекстов.</param>
 public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : IdentityDbContext<ApplicationUser>(options)
 {
+    /// <summary>Серверная корзина одного покупателя либо гостевого секрета; преобразованная корзина больше не редактируется.</summary>
+    public DbSet<Cart> Carts => Set<Cart>();
+    /// <summary>Выбранное количество одного варианта; цена проверяется заново и здесь не хранится.</summary>
+    public DbSet<CartItem> CartItems => Set<CartItem>();
+    /// <summary>Ключ повторяемого добавления в корзину с проверкой неизменности команды.</summary>
+    public DbSet<CartOperation> CartOperations => Set<CartOperation>();
+    /// <summary>Серверные условия оформления; персональные данные доступны только владельцу.</summary>
+    public DbSet<CheckoutPreview> CheckoutPreviews => Set<CheckoutPreview>();
+    /// <summary>Распределение резерва конкретной строки заказа по собственному складу.</summary>
+    public DbSet<OrderReservation> OrderReservations => Set<OrderReservation>();
+    /// <summary>Неизменяемая история переходов покупательского заказа и идемпотентных команд.</summary>
+    public DbSet<OrderEvent> OrderEvents => Set<OrderEvent>();
+    /// <summary>Отдельная очередь писем о заказах; не использует фиктивные решения об опте.</summary>
+    public DbSet<OrderNotification> OrderNotifications => Set<OrderNotification>();
+    /// <summary>Заявки покупателей со снимками реквизитов на момент подачи.</summary>
+    public DbSet<WholesaleApplication> WholesaleApplications => Set<WholesaleApplication>();
+    /// <summary>История предоставления, отклонения и отзыва опта.</summary>
+    public DbSet<WholesaleDecision> WholesaleDecisions => Set<WholesaleDecision>();
+    /// <summary>Уведомления, зафиксированные в транзакции решения и отправляемые после неё.</summary>
+    public DbSet<NotificationOutbox> NotificationOutbox => Set<NotificationOutbox>();
     /// <summary>Закупочный заказ магазина поставщику; не является заказом покупателя.</summary>
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     /// <summary>Выбранная позиция закупки со снимками исходных данных и цен; новый прайс не меняет заказ.</summary>

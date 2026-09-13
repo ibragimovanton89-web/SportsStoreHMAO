@@ -10,6 +10,10 @@ public sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderItem>
     public void Configure(EntityTypeBuilder<OrderItem> b)
     {
         ConfigurationDefaults.Entity(b);
+        b.Property(x => x.Size).HasComment("Снимок размера; null, если неприменим.");
+        b.Property(x => x.Color).HasComment("Снимок цвета; null, если неприменим.");
+        b.Property(x => x.MinimumQuantity).HasComment("Применённая количественная ступень одного SKU.");
+
         b.HasOne<Order>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne<ProductVariant>().WithMany().HasForeignKey(x => x.ProductVariantId).OnDelete(DeleteBehavior.SetNull);
         b.ToTable(t => t.HasCheckConstraint("CK_OrderItem_Valid", "\"Quantity\" > 0 AND \"UnitPrice\" >= 0 AND \"UnitDiscount\" >= 0 AND \"UnitDiscount\" <= \"UnitPrice\""));

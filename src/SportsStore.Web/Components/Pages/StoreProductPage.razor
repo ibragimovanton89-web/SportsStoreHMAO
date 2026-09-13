@@ -1,14 +1,87 @@
 @page "/catalog/{Id:guid}"
 @using SportsStore.Application.Storefront
+@using SportsStore.Web.Storefront
 @inject IStorefront Storefront
-@* Публичная карточка не содержит внутренних закупочных сумм и не принимает оплату. *@
-<PageTitle>@(Data?.Name ?? "Товар не найден") · SportsStoreHMAO</PageTitle><section class="container store-catalog"><a href="/catalog">← Все товары</a>
-@if (Data is null) { <h1>Товар не найден</h1><p>Карточка недоступна или ещё не опубликована.</p> } else { <p class="eyebrow">@Data.Brand / @Data.Category</p><h1>@Data.Name</h1><div class="store-detail"><div class="store-gallery">@foreach (var image in Data.Images) { <img src="@image" alt="@Data.Name" /> }</div><div><p class="store-description">@Data.Description</p>@foreach (var v in Data.Variants) { <article class="store-variant"><h2>@v.Size @v.Color</h2><small>SKU @v.Sku · за @v.Unit</small><p class="store-price">@v.Price.ToString("N2") ₽</p><p>@(v.Available > 0 ? $"На складе: {v.Available:0.####} {v.Unit}" : v.Incoming > 0 ? "В пути на наш склад" : "Нет в наличии")</p></article> }<p>Магазин работает на территории ХМАО — Югры. Онлайн-оформление заказа будет доступно позднее.</p></div></div> }</section>
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject ILogger<StoreProductPage> Logger
+@implements IDisposable
+@* Карточка SSR с интерактивным выбором только публичных розничных вариантов; описание не интерпретируется как HTML. *@
+<PageTitle>@(Data?.Name ?? "Товар недоступен") · SportsStoreHMAO</PageTitle>
+<HeadContent><meta name="description" content="@(Data is null ? "Карточка товара недоступна." : CatalogQuery.Text(Data.Description ?? $"{Data.Name}. {Data.Brand}. Розничная цена и наличие в ХМАО — Югре.", 160))" />
+@if (Data is not null && CatalogUrls.Canonical(Configuration["Store:PublicBaseUrl"], Navigation.Uri, $"/catalog/{Id}") is string canonical) { <link rel="canonical" href="@canonical" /> }</HeadContent>
+<section class="container sf-product">
+<a class="sf-back" href="@CatalogUrls.SafeReturn(Return)">← Вернуться к товарам</a>
+@if (Failed) { <div class="sf-empty" role="alert"><h1>Не удалось загрузить товар</h1><p>Попробуйте обновить страницу немного позже.</p><a href="@Navigation.Uri">Повторить</a></div> }
+else if (Data is not null && Selected is not null)
+{
+    <nav class="sf-breadcrumbs" aria-label="Хлебные крошки"><a href="/catalog">Каталог</a>@foreach (var category in Data.CategoryPath) { <span aria-hidden="true">/</span><a href="@CatalogUrls.Catalog(new() { Category = category.Id })">@category.Name</a> }</nav>
+    <div class="sf-product-grid">
+        <div class="sf-gallery" tabindex="0" @onkeydown="GalleryKey" aria-label="Галерея товара. Стрелки влево и вправо меняют фотографию.">
+            <div class="sf-main-photo">@if (Data.Images.Count > 0 && !Broken.Contains(Data.Images[Photo])) { <img @key="Data.Images[Photo]" src="@Data.Images[Photo]" alt="@($"{Data.Name}, фото {Photo + 1}")" width="800" height="900" @onerror="() => Broken.Add(Data.Images[Photo])" /> } else { <p role="status">Фотография временно недоступна</p> }</div>
+            @if (Data.Images.Count > 1) { <div class="sf-gallery-controls"><button type="button" @onclick="() => MovePhoto(-1)" aria-label="Предыдущее фото">←</button><span aria-live="polite">Фото @(Photo + 1) из @Data.Images.Count</span><button type="button" @onclick="() => MovePhoto(1)" aria-label="Следующее фото">→</button></div><div class="sf-thumbnails">@for (var index = 0; index < Data.Images.Count; index++) { var chosen = index; <button type="button" @onclick="() => Photo = chosen" aria-pressed="@((Photo == chosen).ToString().ToLowerInvariant())" aria-label="@($"Показать фото {chosen + 1}")"><img src="@Data.Images[chosen]" alt="" width="80" height="90" loading="lazy" /></button> }</div> }
+        </div>
+        <div class="sf-product-info"><p class="eyebrow">@Data.Brand</p><h1>@Data.Name</h1>
+            @if (Data.Variants.Any(v => !string.IsNullOrWhiteSpace(v.Size))) { <fieldset class="sf-choice"><legend>Размер</legend>@foreach (var size in Data.Variants.Select(v => v.Size).Distinct().OrderBy(x => x)) { <button type="button" aria-pressed="@((Selected.Size == size).ToString().ToLowerInvariant())" @onclick="() => SelectSize(size)">@(size ?? "Без размера")</button> }</fieldset> }
+            @if (Data.Variants.Any(v => !string.IsNullOrWhiteSpace(v.Color))) { <fieldset class="sf-choice"><legend>Цвет</legend>@foreach (var color in Data.Variants.Select(v => v.Color).Distinct().OrderBy(x => x)) { <button type="button" disabled="@(!Data.Variants.Any(v => v.Size == Selected.Size && v.Color == color))" aria-pressed="@((Selected.Color == color).ToString().ToLowerInvariant())" @onclick="() => SelectColor(color)">@(color ?? "Без цвета")</button> }</fieldset> }
+            @if (Data.Variants.Count(v => v.Size == Selected.Size && v.Color == Selected.Color) > 1) { <label class="sf-variant-select">Вариант<select value="@Selected.Id" @onchange="ChooseVariant">@foreach (var v in Data.Variants.Where(v => v.Size == Selected.Size && v.Color == Selected.Color)) { <option value="@v.Id">@v.Sku · @v.Unit</option> }</select></label> }
+            <div class="sf-selection" aria-live="polite"><small class="sf-retail-label">Розничная цена</small><div class="sf-detail-price">@Selected.Price.ToString("N2") ₽ <small>/ @Selected.Unit</small></div><p class="sf-availability">@(Selected.Available > 0 ? $"На складе: {Selected.Available:0.####} {Selected.Unit}" : CatalogUrls.Availability(Selected.Availability))</p><dl><dt>Внутренний SKU</dt><dd>@Selected.Sku</dd>@if (!string.IsNullOrWhiteSpace(Selected.ManufacturerCode)) { <dt>Артикул производителя</dt><dd>@Selected.ManufacturerCode</dd> }<dt>Единица продажи</dt><dd>@Selected.Unit</dd></dl></div>
+@if (Selected.Available >= 1) { <form method="post" action="/cart" data-enhance="false" class="sf-add-cart"><AntiforgeryToken /><input type="hidden" name="command" value="add" /><input type="hidden" name="VariantId" value="@Selected.Id" /><input type="hidden" name="Quantity" value="1" /><input type="hidden" name="OperationId" value="@Guid.NewGuid()" /><button type="submit">В корзину</button></form> }
+
+            <CustomerWholesalePrice ProductId="Id" VariantId="Selected.Id" Unit="@Selected.Unit" />
+            <p class="sf-note">Работаем в ХМАО — Югре. Заказ поступает на подтверждение сотруднику; доставка и оплата согласуются отдельно.</p>
+        </div>
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Data.Description)) { <section class="sf-description"><h2>О товаре</h2><p>@Data.Description</p></section> }
+}
+</section>
 @code {
-    /// <summary>Идентификатор публичной карточки.</summary>
+    /// <summary>Идентификатор только опубликованной карточки.</summary>
     [Parameter] public Guid Id { get; set; }
-    /// <summary>Опубликованная карточка либо null для скрытых состояний.</summary>
+    /// <summary>Недоверенный идентификатор выбора; чужое значение заменяется первым вариантом.</summary>
+    [SupplyParameterFromQuery(Name = "variant")] public string? Variant { get; set; }
+    /// <summary>Возврат только к нормализованному адресу своего каталога.</summary>
+    [SupplyParameterFromQuery(Name = "return")] public string? Return { get; set; }
+    /// <summary>Публичные данные; не содержат закупочных цен.</summary>
     private StoreProduct? Data;
-    /// <summary>Получает только разрешённое публичное представление.</summary>
-    protected override async Task OnParametersSetAsync() => Data = await Storefront.ProductAsync(Id);
+    /// <summary>Текущий вариант, обязательно принадлежащий карточке.</summary>
+    private StoreVariant? Selected;
+    /// <summary>Номер фотографии по SortOrder.</summary>
+    private int Photo;
+    /// <summary>Адреса отсутствующих файлов для понятной замены.</summary>
+    private readonly HashSet<string> Broken = [];
+    /// <summary>Ошибка загрузки, не означающая снятия публикации.</summary>
+    private bool Failed;
+    /// <summary>Отмена предыдущего чтения при быстрой навигации.</summary>
+    private CancellationTokenSource? Pending;
+    /// <summary>Проверяет публичность при каждой навигации и выдаёт настоящий SSR 404.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        Pending?.Cancel(); Pending?.Dispose(); var pending = Pending = new(); Failed = false; Selected = null;
+        try
+        {
+            var data = await Storefront.ProductAsync(Id, pending.Token); if (pending.IsCancellationRequested) return;
+            if (Data?.Id != data?.Id) { Photo = 0; Broken.Clear(); } Data = data;
+            if (Data is null) { Navigation.NotFound(); return; }
+            Photo = Math.Min(Photo, Math.Max(0, Data.Images.Count - 1));
+            Selected = Guid.TryParse(Variant, out var id) ? Data.Variants.FirstOrDefault(v => v.Id == id) : null;
+            Selected ??= Data.Variants.OrderBy(v => v.Price).ThenBy(v => v.Id).First();
+        }
+        catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
+        catch (Exception ex) { Logger.LogError(ex, "Ошибка чтения публичной карточки"); if (!pending.IsCancellationRequested) Failed = true; }
+    }
+    /// <summary>Меняет размер, по возможности сохраняя цвет, иначе выбирает первый допустимый вариант.</summary>
+    private void SelectSize(string? size) => Select(Data!.Variants.Where(v => v.Size == size).OrderByDescending(v => v.Color == Selected!.Color).ThenBy(v => v.Price).ThenBy(v => v.Id).First());
+    /// <summary>Выбирает только цвет, существующий у текущего размера.</summary>
+    private void SelectColor(string? color) => Select(Data!.Variants.Where(v => v.Size == Selected!.Size && v.Color == color).OrderBy(v => v.Price).ThenBy(v => v.Id).First());
+    /// <summary>Различает несколько SKU с одинаковыми размером и цветом.</summary>
+    private void ChooseVariant(ChangeEventArgs args) { if (Guid.TryParse(args.Value?.ToString(), out var id) && Data!.Variants.FirstOrDefault(v => v.Id == id) is { } variant) Select(variant); }
+    /// <summary>Навигация сохраняет выбранный вариант в истории браузера.</summary>
+    private void Select(StoreVariant variant) => Navigation.NavigateTo(CatalogUrls.Product(Id, variant.Id, CatalogUrls.Parse("https://catalog.invalid" + CatalogUrls.SafeReturn(Return))));
+    /// <summary>Циклически меняет изображение без изменения выбранного SKU.</summary>
+    private void MovePhoto(int direction) { if (Data!.Images.Count > 0) Photo = (Photo + direction + Data.Images.Count) % Data.Images.Count; }
+    /// <summary>Галерея доступна с клавиатуры без мыши.</summary>
+    private void GalleryKey(KeyboardEventArgs args) { if (args.Key == "ArrowLeft") MovePhoto(-1); else if (args.Key == "ArrowRight") MovePhoto(1); else if (args.Key == "Home") Photo = 0; else if (args.Key == "End") Photo = Math.Max(0, Data!.Images.Count - 1); }
+    /// <summary>Отменяет незавершённое чтение при уходе со страницы.</summary>
+    public void Dispose() { Pending?.Cancel(); Pending?.Dispose(); }
 }

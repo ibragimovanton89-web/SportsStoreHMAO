@@ -7,6 +7,18 @@ namespace SportsStore.Tests;
 /// <summary>Границы временного входа: среда, адрес соединения и неподделываемый claims-полем маркер.</summary>
 public sealed class DevelopmentAdminAccessTests
 {
+    /// <summary>Включённый обход не подменяет покупателя, сотрудника или вторую аутентифицированную identity.</summary>
+    [Theory]
+    [InlineData("Customer")]
+    [InlineData("Admin")]
+    [InlineData("Manager")]
+    public void AuthenticatedSessionHasPriorityOverBypass(string role)
+    {
+        var user = new ClaimsPrincipal(new[] { new ClaimsIdentity(), new ClaimsIdentity(new[] { new Claim(ClaimTypes.Role, role) }, "Identity.Application") });
+        Assert.False(DevelopmentAdminAccess.ShouldBypass(user, IPAddress.Loopback, "localhost"));
+        Assert.True(DevelopmentAdminAccess.ShouldBypass(new ClaimsPrincipal(), IPAddress.Loopback, "localhost"));
+        Assert.False(DevelopmentAdminAccess.ShouldBypass(new ClaimsPrincipal(), IPAddress.Parse("192.168.1.20"), "localhost"));
+    }
     /// <summary>Обход запрещён в Production и Staging, даже если флаг ошибочно оставлен включённым.</summary>
     [Theory]
     [InlineData("Production")]

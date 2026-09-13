@@ -1,20 +1,106 @@
 @page "/catalog"
 @using SportsStore.Application.Storefront
+@using SportsStore.Web.Storefront
+@using System.Globalization
 @inject IStorefront Storefront
-@* Публичная серверная витрина; GET-поиск не требует административной сессии или интерактивного контекста БД. *@
-<PageTitle>Спортивные товары · SportsStoreHMAO</PageTitle><section class="container store-catalog"><p class="eyebrow">ХМАО — Югра / оригинальные бренды</p><h1>Наши товары</h1><form method="get" action="/catalog" class="store-search"><label>Поиск товара<input name="q" value="@Search" maxlength="200" /></label><button class="button" type="submit">Найти</button></form>
-@if (Data is not null) { @if (Data.Total == 0) { <p>Пока нет опубликованных товаров по этому запросу.</p> }<div class="store-grid">@foreach (var p in Data.Items) { <article class="store-card"><a href="@($"/catalog/{p.Id}")">@if (p.Images.Count > 0) { <img src="@p.Images[0]" alt="@p.Name" loading="lazy" /> }<small>@p.Brand · @p.Category</small><h2>@p.Name</h2><strong>от @p.Variants.Min(v => v.Price).ToString("N2") ₽</strong><p>@Availability(p)</p></a></article> }</div><div class="store-pagination">@if (Data.Page > 1) { <a href="@PageUrl(Data.Page - 1)">← Назад</a> }<span>Найдено @Data.Total</span>@if (Data.Page * 24 < Data.Total) { <a href="@PageUrl(Data.Page + 1)">Далее →</a> }</div> }</section>
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
+@inject ILogger<StoreCatalog> Logger
+@implements IDisposable
+@* Розничная SSR-витрина: GET-форма сохраняет фильтры в URL и не создаёт запрос на каждый символ. *@
+<PageTitle>Каталог спортивных товаров · SportsStoreHMAO</PageTitle>
+<HeadContent><meta name="description" content="Оригинальные спортивные товары в ХМАО — Югре. Выберите бренд, размер и цвет, сравните розничные цены и наличие." />
+@if (CatalogUrls.Canonical(Configuration["Store:PublicBaseUrl"], Navigation.Uri, "/catalog") is string canonical) { <link rel="canonical" href="@canonical" /> }</HeadContent>
+<section class="container sf-catalog">
+    <p class="eyebrow">Спорт начинается с выбора / ХМАО — Югра</p>
+    <div class="sf-title"><h1>Найди свой темп<span>.</span></h1><span class="sf-count">@(Data is null ? "Каталог" : $"Найдено: {Data.Total}")</span></div>
+    @if (Failed) { <div class="sf-empty" role="alert"><h2>Не удалось загрузить каталог</h2><p>Попробуйте обновить страницу немного позже.</p><a class="button" href="@Navigation.Uri">Повторить</a></div> }
+    else if (Data is not null)
+    {
+        <form action="/catalog" method="get" data-enhance="false" class="sf-form">
+            @* Отсутствующие в текущих фасетах выбранные значения сохраняются при новом поиске; удалить их можно метками. *@
+            @foreach (var id in Query.Brands.Where(id => !Data.Facets.Brands.Any(b => b.Id == id))) { <input type="hidden" name="brand" value="@id" /> }
+            @foreach (var size in Query.Sizes.Where(s => !Data.Facets.Sizes.Contains(s))) { <input type="hidden" name="size" value="@size" /> }
+            @foreach (var color in Query.Colors.Where(c => !Data.Facets.Colors.Contains(c))) { <input type="hidden" name="color" value="@color" /> }
+            @if (Query.Category is Guid missingCategory && Data.Facets.Categories.Count == 0) { <input type="hidden" name="category" value="@missingCategory" /> }
+            @if (Data.BaselineTotal == 0) { <input type="hidden" name="min" value="@Query.MinPrice?.ToString(CultureInfo.InvariantCulture)" /><input type="hidden" name="max" value="@Query.MaxPrice?.ToString(CultureInfo.InvariantCulture)" /><input type="hidden" name="availability" value="@Query.Availability" /> }
+            <div class="sf-toolbar"><label class="sf-search">Поиск по названию или артикулу<input type="search" name="q" value="@Query.Search" maxlength="200" placeholder="Название, SKU или артикул" /></label><button class="button" type="submit">Найти</button>
+            <label>Сортировка<select name="sort" value="@Query.Sort"><option value="name" selected="@(Query.Sort == "name")">Название: А–Я</option><option value="price-asc" selected="@(Query.Sort == "price-asc")">Сначала дешевле</option><option value="price-desc" selected="@(Query.Sort == "price-desc")">Сначала дороже</option><option value="newest" selected="@(Query.Sort == "newest")">Сначала новые</option></select></label></div>
+            <div class="sf-body"><details class="sf-filters" open><summary>Фильтры <span>Настроить ↓</span></summary><div class="sf-filter-content">
+                @if (Data.Facets.Categories.Count > 0) { <label>Категория<select name="category"><option value="">Все категории</option>@foreach (var category in Data.Facets.Categories) { <option value="@category.Id" selected="@(Query.Category == category.Id)">@category.Name</option> }</select></label> }
+                @if (Data.Facets.Brands.Count > 0) { <fieldset><legend>Бренд</legend>@foreach (var brand in Data.Facets.Brands) { <label class="sf-check"><input type="checkbox" name="brand" value="@brand.Id" checked="@Query.Brands.Contains(brand.Id)" />@brand.Name</label> }</fieldset> }
+                @if (Data.BaselineTotal > 0) { <fieldset><legend>Цена, ₽</legend><div class="sf-price-inputs"><label><span class="sf-sr">Цена от</span><input name="min" type="number" min="0" step="0.01" value="@Query.MinPrice?.ToString(CultureInfo.InvariantCulture)" placeholder="От" /></label><label><span class="sf-sr">Цена до</span><input name="max" type="number" min="0" step="0.01" value="@Query.MaxPrice?.ToString(CultureInfo.InvariantCulture)" placeholder="До" /></label></div></fieldset> }
+                @if (Data.Facets.Sizes.Count > 0) { <fieldset><legend>Размер</legend><div class="sf-options">@foreach (var size in Data.Facets.Sizes) { <label class="sf-check"><input type="checkbox" name="size" value="@size" checked="@Query.Sizes.Contains(size)" />@size</label> }</div></fieldset> }
+                @if (Data.Facets.Colors.Count > 0) { <fieldset><legend>Цвет</legend>@foreach (var color in Data.Facets.Colors) { <label class="sf-check"><input type="checkbox" name="color" value="@color" checked="@Query.Colors.Contains(color)" />@color</label> }</fieldset> }
+                @if (Data.BaselineTotal > 0) { <label>Доступность<select name="availability"><option value="all" selected="@(Query.Availability == "all")">Все товары</option>@foreach (var status in new[] { "stock", "incoming", "absent" }) { <option value="@status" selected="@(Query.Availability == status)">@CatalogUrls.Availability(status)</option> }</select></label> }
+                <button class="button" type="submit">Показать товары</button><a class="sf-reset" href="@CatalogUrls.Catalog(new() { Search = Query.Search, Sort = Query.Sort })">Сбросить фильтры</a>
+            </div></details>
+            <div class="sf-results">
+                <div class="sf-chips" aria-label="Выбранные фильтры">
+                    @foreach (var chip in Chips()) { <a href="@CatalogUrls.Catalog(chip.Query with { Page = 1 })" aria-label="@($"Убрать фильтр: {chip.Label}")">@chip.Label <span aria-hidden="true">×</span></a> }
+                </div>
+                @if (Data.Total == 0) { <div class="sf-empty"><h2>@(!Data.CatalogHasProducts ? "Готовим ассортимент" : Data.BaselineTotal == 0 && Query.Search.Length > 0 ? "По запросу ничего не найдено" : "Нет товаров с такими фильтрами")</h2><p>@(!Data.CatalogHasProducts ? "Здесь появятся опубликованные товары магазина." : "Попробуйте другое название или измените выбранные параметры.")</p></div> }
+                <div class="sf-grid">
+                @foreach (var product in Data.Items)
+                {
+                    var variant = product.Variants.OrderBy(v => v.Price).ThenBy(v => v.Id).First(); var multiplePrices = product.HasDifferentPrices;
+                    <article class="sf-card"><a href="@CatalogUrls.Product(product.Id, variant.Id, Query)"><div class="sf-photo">@if (product.Images.Count > 0 && !MissingImages.Contains(product.Images[0])) { <img src="@product.Images[0]" alt="@product.Name" @onerror="() => MissingImages.Add(product.Images[0])" width="480" height="540" loading="@(Data.Items.Take(3).Contains(product) ? "eager" : "lazy")" /> } else { <span>Фото временно недоступно</span> }</div><div class="sf-card-text"><p class="sf-brand">@product.Brand</p><h2>@product.Name</h2><small class="sf-retail-label">Розничная цена</small><div class="sf-card-price">@(multiplePrices ? "от " : "")@variant.Price.ToString("N2") ₽ <small>/ @variant.Unit</small></div><p class="sf-availability">@CatalogUrls.Availability(product.Variants.Any(v => v.Available > 0) ? "stock" : product.Variants.Any(v => v.Incoming > 0) ? "incoming" : "absent")</p></div></a></article>
+                }
+                </div>
+                @if (Data.Total > 0) { <nav class="sf-pagination" aria-label="Страницы каталога">@if (Data.Page > 1) { <a href="@CatalogUrls.Catalog(Query with { Page = Data.Page - 1 })">← Назад</a> }<span>Страница @Data.Page из @Math.Max(1, (Data.Total + 23) / 24)</span>@if (Data.Page * 24 < Data.Total) { <a href="@CatalogUrls.Catalog(Query with { Page = Data.Page + 1 })">Далее →</a> }</nav> }
+            </div></div>
+        </form>
+    }
+</section>
 @code {
-    /// <summary>Поиск из строки запроса, ограниченный сервисом.</summary>
-    [SupplyParameterFromQuery(Name = "q")] public string? Search { get; set; }
-    /// <summary>Номер страницы, нормализованный сервером.</summary>
-    [SupplyParameterFromQuery(Name = "page")] public int Page { get; set; } = 1;
-    /// <summary>Только опубликованные карточки.</summary>
+    /// <summary>Поисковый параметр инициирует обновление при Back/Forward.</summary>
+    [SupplyParameterFromQuery(Name = "q")] public string? SearchParameter { get; set; }
+    /// <summary>Категория из URL; разбирается безопасно общим парсером.</summary>
+    [SupplyParameterFromQuery(Name = "category")] public string? CategoryParameter { get; set; }
+    /// <summary>Бренды из URL.</summary>
+    [SupplyParameterFromQuery(Name = "brand")] public string[]? BrandParameters { get; set; }
+    /// <summary>Размеры из URL.</summary>
+    [SupplyParameterFromQuery(Name = "size")] public string[]? SizeParameters { get; set; }
+    /// <summary>Цвета из URL.</summary>
+    [SupplyParameterFromQuery(Name = "color")] public string[]? ColorParameters { get; set; }
+    /// <summary>Нижняя цена; строковый тип исключает HTTP 500 при неверном числе.</summary>
+    [SupplyParameterFromQuery(Name = "min")] public string? MinParameter { get; set; }
+    /// <summary>Верхняя цена.</summary>
+    [SupplyParameterFromQuery(Name = "max")] public string? MaxParameter { get; set; }
+    /// <summary>Статус наличия.</summary>
+    [SupplyParameterFromQuery(Name = "availability")] public string? AvailabilityParameter { get; set; }
+    /// <summary>Сортировка.</summary>
+    [SupplyParameterFromQuery(Name = "sort")] public string? SortParameter { get; set; }
+    /// <summary>Страница; неверное значение нормализуется.</summary>
+    [SupplyParameterFromQuery(Name = "page")] public string? PageParameter { get; set; }
+    /// <summary>Отсутствующие файлы заменяются подписью без изменения пропорций карточки.</summary>
+    private readonly HashSet<string> MissingImages = [];
+    /// <summary>Снимок розничной страницы и доступных фильтров.</summary>
     private StorePage? Data;
-    /// <summary>Загружает карточки для текущего GET-запроса.</summary>
-    protected override async Task OnParametersSetAsync() => Data = await Storefront.ListAsync(Search, Page);
-    /// <summary>Сохраняет поисковый запрос в безопасно кодированной ссылке.</summary>
-    private string PageUrl(int page) => $"/catalog?q={Uri.EscapeDataString(Search ?? "")}&page={page}";
-    /// <summary>Доступность считается из фактического остатка и подтверждённых закупок.</summary>
-    private static string Availability(StoreProduct p) => p.Variants.Any(v => v.Available > 0) ? "На складе" : p.Variants.Any(v => v.Incoming > 0) ? "В пути" : "Нет в наличии";
+    /// <summary>Нормализованное состояние URL.</summary>
+    private CatalogQuery Query = new();
+    /// <summary>Временная ошибка отличается от пустого результата.</summary>
+    private bool Failed;
+    /// <summary>Отмена чтения при уходе со страницы.</summary>
+    private CancellationTokenSource? Pending;
+    /// <summary>Загружает SSR-выдачу; старый ответ после смены URL игнорируется.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        Pending?.Cancel(); Pending?.Dispose(); var pending = Pending = new(); Failed = false; Query = CatalogUrls.Parse(Navigation.Uri);
+        try { var data = await Storefront.ListAsync(Query, pending.Token); if (!pending.IsCancellationRequested) { Data = data; Query = data.Query; } }
+        catch (OperationCanceledException) when (pending.IsCancellationRequested) { }
+        catch (Exception ex) { Logger.LogError(ex, "Ошибка чтения публичного каталога"); if (!pending.IsCancellationRequested) Failed = true; }
+    }
+    /// <summary>Ссылки удаления отдельных групп без потери остальных условий.</summary>
+    private IEnumerable<(string Label, CatalogQuery Query)> Chips()
+    {
+        if (Query.Category is Guid category) yield return (Data!.Facets.Categories.FirstOrDefault(c => c.Id == category)?.Name ?? "Категория", Query with { Category = null });
+        foreach (var id in Query.Brands) yield return (Data!.Facets.Brands.FirstOrDefault(b => b.Id == id)?.Name ?? "Бренд", Query with { Brands = Query.Brands.Where(b => b != id).ToArray() });
+        foreach (var size in Query.Sizes) yield return (size, Query with { Sizes = Query.Sizes.Where(v => v != size).ToArray() });
+        foreach (var color in Query.Colors) yield return (color, Query with { Colors = Query.Colors.Where(v => v != color).ToArray() });
+        if (Query.MinPrice is not null || Query.MaxPrice is not null) yield return ($"Цена: {Query.MinPrice?.ToString("N0") ?? "0"}–{Query.MaxPrice?.ToString("N0") ?? "∞"} ₽", Query with { MinPrice = null, MaxPrice = null });
+        if (Query.Availability != "all") yield return (CatalogUrls.Availability(Query.Availability), Query with { Availability = "all" });
+    }
+    /// <summary>Освобождает отмену, не оставляя контекст БД в компоненте.</summary>
+    public void Dispose() { Pending?.Cancel(); Pending?.Dispose(); }
 }

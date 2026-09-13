@@ -135,7 +135,8 @@ public sealed class PricingService(IDbContextFactory<ApplicationDbContext> facto
         await using var db = await factory.CreateDbContextAsync(ct);
         var customer = authenticatedUserId is null ? null : await db.Customers.SingleOrDefaultAsync(x => x.ApplicationUserId == authenticatedUserId, ct);
         var segment = PriceCalculator.AvailableSegment(customer);
-        var price = await db.SalePrices.Where(x => x.ProductVariantId == variantId && x.Segment == segment && x.MinimumQuantity <= quantity)
+        // Розничная витрина использует те же положительные сохранённые RUB-цены; публичность проверяется отдельно.
+        var price = await SalePriceSelection.Eligible(db, segment).Where(x => x.ProductVariantId == variantId && x.MinimumQuantity <= quantity)
             .OrderByDescending(x => x.MinimumQuantity).FirstOrDefaultAsync(ct);
         // Для подтверждённого оптового покупателя отсутствие оптовой цены является ошибкой, а не переходом на розницу.
         if (price is null) throw new InvalidOperationException("No published price for the eligible segment and quantity.");
@@ -186,4 +187,3 @@ public sealed class PricingService(IDbContextFactory<ApplicationDbContext> facto
         return new(amount, rule, fingerprint, source);
     }
 }
-

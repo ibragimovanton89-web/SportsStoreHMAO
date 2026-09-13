@@ -1,0 +1,33 @@
+@using SportsStore.Application.Customers
+@inject IWholesaleAdministration Wholesale
+@inherits AdminPageBase
+@* Встраиваемое рассмотрение заявок; Manager читает снимки, решение доступно только Admin. *@
+<section class="admin-panel"><h2>Заявки и история опта</h2><Feedback Busy="Busy" Error="@Error" Success="@Success" />
+@if (Applications.Count == 0) { <p>Заявок пока нет. Ранее предоставленный опт сохраняется без создания фиктивной заявки.</p> }
+@foreach (var a in Applications) { <article><h3>@Status(a.Status) · @a.SubmittedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</h3><p>@(a.Kind == CustomerKind.Individual ? "Физическое лицо" : a.Kind == CustomerKind.SoleProprietor ? "ИП" : "Организация") · @a.LegalName</p><p>ИНН: @(a.Inn ?? "—") · КПП: @(a.Kpp ?? "—")</p><p>@a.Comment</p><p>@a.PublicReason</p>
+@if (a.Status == WholesaleApplicationStatus.Pending) { <AuthorizeView Policy="@AdminPolicies.Administrator"><div class="form-actions"><button disabled="@Busy" @onclick="() => Decide(a, true)">Одобрить заявку</button><button disabled="@Busy" @onclick="() => Decide(a, false)">Отклонить заявку</button></div></AuthorizeView> }</article> }
+<AuthorizeView Policy="@AdminPolicies.Administrator"><label>Публичная причина решения<textarea @bind="Reason" @bind:event="oninput" maxlength="500" placeholder="Покупатель увидит этот текст в кабинете и письме"></textarea></label>@if (Customer.Wholesale == WholesaleStatus.Approved) { <button disabled="@Busy" @onclick="Revoke">Отозвать оптовые условия</button> }</AuthorizeView>
+@foreach (var h in History) { <p><strong>@Status(h.Outcome)</strong> · @h.At.ToLocalTime().ToString("dd.MM.yyyy HH:mm") — @h.Reason @(h.WithoutApplication ? "(без заявки)" : "")</p> }
+</section>
+@code {
+    /// <summary>Выбранный покупатель и ожидаемая версия отзыва.</summary>
+    [Parameter, EditorRequired] public CustomerData Customer { get; set; } = default!;
+    /// <summary>Обновляет таблицу родителя после решения.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    /// <summary>Снимки заявок для проверки сотрудником.</summary>
+    private IReadOnlyList<WholesaleApplicationData> Applications = [];
+    /// <summary>Неизменяемые публичные объяснения прошлых решений.</summary>
+    private IReadOnlyList<WholesaleHistory> History = [];
+    /// <summary>Обязательная причина нового решения; обновляется при вводе, до нажатия кнопки решения.</summary>
+    private string Reason = "";
+    /// <summary>Загружает данные при выборе покупателя.</summary>
+    protected override Task OnParametersSetAsync() => RunAsync(Load);
+    /// <summary>Права на чтение проверяются сервисом, включая текущую MFA.</summary>
+    private async Task Load() { Applications = await Wholesale.ApplicationsAsync(Customer.Id, Cancellation.Token); History = await Wholesale.HistoryAsync(Customer.Id, Cancellation.Token); }
+    /// <summary>Передаёт конкретную версию заявки на транзакционное решение.</summary>
+    private Task Decide(WholesaleApplicationData a, bool approve) => RunAsync(async () => { await Wholesale.DecideAsync(a.Id, a.Version, approve, Reason, OperationId, Cancellation.Token); OperationId = Guid.NewGuid(); await Load(); await Changed.InvokeAsync(); }, true);
+    /// <summary>Отзывает одобрение, защищаясь от устаревшей версии покупателя.</summary>
+    private Task Revoke() => RunAsync(async () => { await Wholesale.RevokeAsync(Customer.Id, Customer.Version, Reason, OperationId, Cancellation.Token); OperationId = Guid.NewGuid(); await Load(); await Changed.InvokeAsync(); }, true);
+    /// <summary>Отображает название состояния по-русски.</summary>
+    private static string Status(WholesaleApplicationStatus status) => SportsStore.Web.Pages.Customer.IndexModel.StatusName(status);
+}

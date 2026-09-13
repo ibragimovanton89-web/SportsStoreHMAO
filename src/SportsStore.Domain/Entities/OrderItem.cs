@@ -18,5 +18,11 @@ public sealed class OrderItem : Entity
     public decimal UnitPrice { get; set; }
     /// <summary>Зафиксированная скидка на одну единицу в валюте заказа; итог строки = Quantity × (UnitPrice − UnitDiscount).</summary>
     public decimal UnitDiscount { get; set; }
+    /// <summary>Снимок размера; null, если неприменим.</summary>
+    public string? Size { get; set; } = null;
+    /// <summary>Снимок цвета; null, если неприменим.</summary>
+    public string? Color { get; set; } = null;
+    /// <summary>Применённая количественная ступень одного SKU.</summary>
+    public decimal MinimumQuantity { get; set; } = 1;
 }
 

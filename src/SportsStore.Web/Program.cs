@@ -18,6 +18,11 @@ builder.Configuration.AddDevelopmentDatabaseFallback(builder.Environment);
 // Ошибочно включённый обход на опубликованном хосте останавливает запуск.
 var developmentAdmin = builder.Configuration.GetValue<bool>(DevelopmentAdminAccess.ConfigurationKey);
 DevelopmentAdminAccess.ValidateEnvironment(builder.Environment.EnvironmentName, developmentAdmin);
+// Тестовый захват писем нельзя случайно включить на опубликованном сервере.
+if (!builder.Environment.IsDevelopment() && builder.Configuration["Email:Mode"] == "Capture")
+    throw new InvalidOperationException("Email:Mode=Capture разрешён только в Development.");
+if (builder.Configuration["Email:Mode"] is "Capture" or "Smtp")
+    _ = new SportsStore.Infrastructure.Customers.CustomerEmailTransport(builder.Configuration, builder.Environment).PublicOrigin();
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
 // URL приглашения содержит одноразовый токен: стандартное журналирование полного запроса отключено.
@@ -43,9 +48,15 @@ builder.Services.AddOptions<StoreOptions>()
 builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddRazorPages();
+builder.Services.AddScoped<GuestCartIdentity>();
+builder.Services.AddScoped<SportsStore.Application.Commerce.IGuestCartIdentity>(sp => sp.GetRequiredService<GuestCartIdentity>());
+builder.Services.AddHostedService<SportsStore.Infrastructure.Commerce.CommerceWorker>();
+builder.Services.AddRazorPages(options => { options.Conventions.AddPageRoute("/Commerce/Checkout", "/checkout"); options.Conventions.AddPageRoute("/Commerce/Checkout", "/customer/orders/{Id:guid?}"); });
 builder.Services.AddScoped<AuthenticationStateProvider, StaffAuthenticationStateProvider>();
 builder.Services.AddScoped<IAdminIdentity, WebAdminIdentity>();
+builder.Services.AddScoped<SportsStore.Application.Customers.ICustomerIdentity, WebCustomerIdentity>();
+builder.Services.AddScoped<IAuthorizationHandler, CustomerAuthorizationHandler>();
+builder.Services.AddHostedService<SportsStore.Infrastructure.Customers.NotificationWorker>();
 builder.Services.AddScoped<AdminAccess>();
 builder.Services.AddScoped<IAdminCatalog, AdminCatalog>();
 builder.Services.AddScoped<IPurchasing, Purchasing>();
@@ -58,6 +69,7 @@ builder.Services.AddScoped<IAdminEmployees, AdminEmployees>();
 builder.Services.AddScoped<IAuthorizationHandler, StaffAuthorizationHandler>();
 builder.Services.AddAuthorization(options =>
 {
+    options.AddPolicy("Customer", policy => policy.RequireAuthenticatedUser().AddRequirements(new CustomerRequirement()));
     options.AddPolicy(AdminPolicies.Staff, policy => policy.RequireAuthenticatedUser().AddRequirements(new StaffRequirement(false)));
     options.AddPolicy(AdminPolicies.Administrator, policy => policy.RequireAuthenticatedUser().AddRequirements(new StaffRequirement(true)));
 });
@@ -81,6 +93,14 @@ builder.Services.ConfigureApplicationCookie(options =>
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("customer-account", context =>
+    {
+        var sensitive = HttpMethods.IsPost(context.Request.Method) && context.Request.Path.Value is not
+            ("/customer/profile" or "/customer/addresses" or "/customer/wholesale" or "/customer/logout");
+        var key = (context.Connection.RemoteIpAddress?.ToString() ?? "unknown") + (sensitive ? ":identity" : ":cabinet");
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+            { PermitLimit = sensitive ? 15 : 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 });
+    });
     options.AddPolicy("account", context => RateLimitPartition.GetFixedWindowLimiter(
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
         { PermitLimit = 15, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -110,8 +130,11 @@ app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
-    context.Response.Headers["Referrer-Policy"] = context.Request.Path.StartsWithSegments("/account")
+    context.Response.Headers["Referrer-Policy"] = context.Request.Path.StartsWithSegments("/account") || context.Request.Path.StartsWithSegments("/customer")
         ? "no-referrer" : "strict-origin-when-cross-origin";
+    // Каталог может содержать персональную цену; одинаковый безопасный режим также применяется к гостевому ответу.
+    if (context.Request.Path.StartsWithSegments("/customer") || (context.Request.Path.StartsWithSegments("/catalog") || context.Request.Path.StartsWithSegments("/cart") || context.Request.Path.StartsWithSegments("/checkout")))
+        context.Response.OnStarting(() => { context.Response.Headers.CacheControl = "private, no-store"; return Task.CompletedTask; });
     context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()";
     // Текущая серверная оболочка не использует встроенные скрипты или карты импорта.
     context.Response.Headers["Content-Security-Policy"] =
@@ -123,18 +146,32 @@ app.UseHttpsRedirection();
 app.UseRateLimiter();
 // Порядок важен: сначала установление личности, затем права доступа и защита от CSRF.
 app.UseAuthentication();
+// Гостевой секрет выдаётся до SSR; он не заменяет Identity и не содержит персональных данных.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/catalog") || context.Request.Path.StartsWithSegments("/cart") || context.Request.Path.StartsWithSegments("/checkout"))
+        context.RequestServices.GetRequiredService<GuestCartIdentity>().EnsureCookie(context);
+    await next();
+});
 if (developmentAdmin)
 {
     app.Logger.LogWarning("Включён локальный тестовый вход Admin без пароля. Только Development и loopback.");
     app.Use(async (context, next) =>
     {
-        if (DevelopmentAdminAccess.IsLocalRequest(context.Connection.RemoteIpAddress, context.Request.Host.Host))
+        // Настоящая cookie имеет приоритет: иначе кабинет покупателя зацикливается на входе.
+        if (DevelopmentAdminAccess.ShouldBypass(context.User, context.Connection.RemoteIpAddress, context.Request.Host.Host))
             context.User = DevelopmentAdminAccess.CreatePrincipal();
         await next();
     });
 }
 app.UseAuthorization();
 app.UseAntiforgery();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/cart") || context.Request.Path.StartsWithSegments("/checkout"))
+        context.Response.OnStarting(() => { context.Response.Headers.CacheControl = "private, no-store"; return Task.CompletedTask; });
+    await next();
+});
 app.MapStaticAssets();
 app.MapRazorPages();
 // Опубликованные изображения доступны покупателю; черновики требуют действующей сессии сотрудника.

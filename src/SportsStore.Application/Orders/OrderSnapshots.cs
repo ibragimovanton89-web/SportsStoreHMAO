@@ -15,7 +15,7 @@ public static class OrderSnapshots
         if (variant.ProductId != product.Id || quantity <= 0 || actualUnitPrice < 0 || unitDiscount < 0 || unitDiscount > actualUnitPrice)
             throw new ArgumentException("Invalid order snapshot.");
         return new OrderItem { OrderId = orderId, ProductVariantId = variant.Id, Sku = variant.Sku,
-            Name = product.Name, SaleUnit = variant.SaleUnit, Quantity = quantity,
+            Name = product.Name, Size = variant.Size, Color = variant.Color, SaleUnit = variant.SaleUnit, Quantity = quantity,
             UnitPrice = actualUnitPrice, UnitDiscount = unitDiscount };
     }
 }

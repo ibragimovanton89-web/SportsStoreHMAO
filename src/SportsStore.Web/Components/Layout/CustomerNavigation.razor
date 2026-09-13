@@ -1,0 +1,16 @@
+@using SportsStore.Application.Customers
+@inject ICustomerAccount Account
+@* Покупательская навигация не превращает сессию сотрудника или локальный обход в покупательский аккаунт. *@
+@if (SignedIn) { <a href="/customer/profile" data-enhance-nav="false">Личный кабинет</a><form method="post" action="/customer/logout" data-enhance="false"><AntiforgeryToken /><button type="submit">Выйти</button></form> }
+else { <a href="/customer/login" data-enhance-nav="false">Войти</a><a href="/customer/register" data-enhance-nav="false">Регистрация</a> }
+@code {
+    /// <summary>Действующая связь с покупателем, а не только наличие подписанной cookie.</summary>
+    private bool SignedIn;
+    /// <summary>Проверяет сессию для вывода навигации; команды всё равно проверяют её повторно.</summary>
+    protected override async Task OnInitializedAsync()
+    {
+        try { await Account.ProfileAsync(); SignedIn = true; }
+        catch (UnauthorizedAccessException) { SignedIn = false; }
+        catch (Exception) { SignedIn = false; }
+    }
+}
